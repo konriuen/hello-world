@@ -1,13 +1,15 @@
 import dash
 from dash import dcc, html
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State # Updated import
 import plotly.express as px
 import pandas as pd
 from data_generator import generate_sensor_data
 
 # Generate or load data
 # In a real application, you might load this from a file or database
+print("Generating initial sensor data, please wait...")
 sensor_df = generate_sensor_data()
+print("Sensor data generation complete. Application is ready.")
 
 import plotly.graph_objects as go # Import go for empty figure
 
@@ -612,7 +614,7 @@ def update_graph(selected_location, selected_sensor_ids):
 if __name__ == '__main__':
     # Note: Setting debug=False for production or if issues arise with reloader
     # For development, debug=True is fine.
-    app.run_server(debug=True, host='0.0.0.0', port=8050)
+    app.run(debug=True, host='127.0.0.1', port=8050) # Changed from app.run_server and host
 
 #TODO: Next steps from the plan:
 # 4. 特徴量可視化機能の実装
