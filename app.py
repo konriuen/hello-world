@@ -118,14 +118,54 @@ app.layout = html.Div([
     html.H3("Feature Correlation Heatmap"),
     dcc.Graph(id='feature-correlation-heatmap'),
 
+    html.Hr(style={'marginTop': '30px', 'marginBottom': '30px'}),
+    html.H3("Machine Learning Analysis"),
+    html.Div([
+        html.Div([
+            html.Label("Select Models to Train:"),
+            dcc.Checklist(
+                id='ml-model-checklist',
+                options=[
+                    {'label': 'Logistic Regression', 'value': 'Logistic Regression'},
+                    {'label': 'Random Forest', 'value': 'Random Forest'},
+                    {'label': 'LightGBM', 'value': 'LightGBM'}
+                ],
+                value=['Logistic Regression'], # Default selected model(s)
+                labelStyle={'display': 'block'}
+            ),
+        ], style={'width': '30%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+
+        html.Div([
+            html.Button('Run ML Analysis', id='run-ml-analysis-button', n_clicks=0, style={'marginTop': '25px'}),
+        ], style={'width': '30%', 'display': 'inline-block', 'verticalAlign': 'bottom', 'marginLeft': '20px'}),
+    ]),
+
+    # Area for ML results
+    dcc.Loading(
+        id="loading-ml-results",
+        type="default",
+        children=[
+            html.Div(id='ml-results-output-area', children=[
+                # This will be populated by callbacks with graphs and tables
+                # Example structure for one model's results:
+                # html.H4("Results for [Model Name]"),
+                # dcc.Graph(id='feature-importance-graph-[model]'),
+                # html.Div(id='confusion-matrix-output-[model]'),
+                # html.Div(id='metrics-output-[model]'),
+                # dcc.Graph(id='roc-curve-graph-[model]'),
+            ])
+        ]
+    ),
+
     # dcc.Graph(id='waveform-graph'), # This was moved up
     dcc.Store(id='extracted-features-store') # To store extracted features data
 
 ])
 
 # --- Import feature extractor ---
-from feature_extractor import extract_features as calculate_waveform_features, numerize_result # Renamed for clarity
+from feature_extractor import extract_features as calculate_waveform_features, numerize_result
 from dash import dash_table # Import DataTable
+import ml_processor # Import the new ML processor
 
 # Callback to show/hide N Segments input based on "Segmented Features" selection
 @app.callback(
@@ -422,6 +462,101 @@ def update_correlation_heatmap(stored_feature_data):
     )
     fig.update_layout(height=600) # Adjust height as needed
     return fig
+
+# Callback to run ML analysis and display results
+@app.callback(
+    Output('ml-results-output-area', 'children'),
+    [Input('run-ml-analysis-button', 'n_clicks')],
+    [State('extracted-features-store', 'data'),
+     State('ml-model-checklist', 'value')]
+)
+def run_ml_analysis_and_display(n_clicks, stored_feature_data, selected_models):
+    if n_clicks == 0 or not stored_feature_data or not selected_models:
+        if n_clicks > 0 and not stored_feature_data:
+            return html.P("Please extract features first before running ML analysis.", style={'color': 'orange'})
+        if n_clicks > 0 and not selected_models:
+            return html.P("Please select at least one ML model to run.", style={'color': 'red'})
+        return html.P("ML Analysis results will appear here. Select models and click 'Run ML Analysis'.")
+
+    df = pd.DataFrame(stored_feature_data)
+    if df.empty or 'result_numeric' not in df.columns:
+        return html.P("Feature data is empty or 'result_numeric' column is missing.", style={'color': 'red'})
+
+    # Preprocess data
+    X_train, X_test, y_train, y_test, feature_names, error_msg = ml_processor.preprocess_data(df.copy())
+
+    if error_msg:
+        return html.P(f"Error during preprocessing: {error_msg}", style={'color': 'red'})
+    if X_train is None or X_test is None : # Should be caught by error_msg but as a safeguard
+        return html.P("Failed to preprocess data for ML analysis (unknown reason).", style={'color': 'red'})
+
+
+    results_children = []
+    for model_name in selected_models:
+        results_children.append(html.H4(f"Results for: {model_name}"))
+
+        model_results = ml_processor.train_and_evaluate_model(X_train, X_test, y_train, y_test, model_name, feature_names)
+
+        if model_results.get("error"):
+            results_children.append(html.P(f"Error training/evaluating {model_name}: {model_results['error']}", style={'color': 'red'}))
+            continue
+
+        # 1. Feature Importances Plot
+        if model_results.get("feature_importances"):
+            imp_df = pd.DataFrame(list(model_results["feature_importances"].items()), columns=['Feature', 'Importance']).sort_values(by="Importance", ascending=False)
+            # Display top N features or all if less than N
+            top_n = min(len(imp_df), 15)
+            fig_imp = px.bar(imp_df.head(top_n), x='Importance', y='Feature', orientation='h', title=f"Top {top_n} Feature Importances")
+            fig_imp.update_layout(yaxis={'categoryorder':'total ascending'}) # Show most important at top
+            results_children.append(dcc.Graph(figure=fig_imp))
+
+        # 2. Confusion Matrix
+        cm = model_results.get("confusion_matrix")
+        if cm:
+            # Convert list of lists to numpy array for imshow if not already
+            cm_array = np.array(cm)
+            fig_cm = px.imshow(cm_array, text_auto=True,
+                               labels=dict(x="Predicted Label", y="True Label", color="Count"),
+                               x=['OK (0)', 'NG (1)'], y=['OK (0)', 'NG (1)'], # Assuming OK=0, NG=1
+                               color_continuous_scale='Blues',
+                               title="Confusion Matrix")
+            fig_cm.update_layout(xaxis_title="Predicted", yaxis_title="Actual")
+            results_children.append(dcc.Graph(figure=fig_cm))
+
+        # 3. Metrics Table
+        metrics = {
+            "Accuracy": model_results.get("accuracy"),
+            "Precision": model_results.get("precision"),
+            "Recall": model_results.get("recall"),
+            "F1 Score": model_results.get("f1_score"),
+            "ROC AUC": model_results.get("roc_auc")
+        }
+        metrics_df = pd.DataFrame([metrics]).T.reset_index()
+        metrics_df.columns = ["Metric", "Value"]
+        metrics_table = dash_table.DataTable(
+            columns=[{"name": i, "id": i} for i in metrics_df.columns],
+            data=metrics_df.to_dict('records'),
+            style_cell={'textAlign': 'left'},
+            style_header={'fontWeight': 'bold'}
+        )
+        results_children.append(html.H5("Evaluation Metrics:"))
+        results_children.append(metrics_table)
+
+        # 4. ROC Curve
+        roc_data = model_results.get("roc_curve")
+        if roc_data and roc_data.get("fpr") is not None and roc_data.get("tpr") is not None:
+            fig_roc = go.Figure()
+            fig_roc.add_trace(go.Scatter(x=roc_data["fpr"], y=roc_data["tpr"], mode='lines', name=f'ROC Curve (AUC = {model_results.get("roc_auc", 0.0):.2f})'))
+            fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode='lines', name='Random Chance', line=dict(dash='dash')))
+            fig_roc.update_layout(title='ROC Curve', xaxis_title='False Positive Rate', yaxis_title='True Positive Rate', legend=dict(x=0.6, y=0.1))
+            results_children.append(dcc.Graph(figure=fig_roc))
+
+        results_children.append(html.Hr())
+
+    if not results_children: # If loop was skipped due to no models or other issues prior
+        return html.P("No results to display. Check selections or data.", style={'color': 'orange'})
+
+    return html.Div(results_children)
 
 
 # Callback for CSV download
