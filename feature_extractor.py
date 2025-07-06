@@ -244,3 +244,10 @@ if __name__ == '__main__':
     # seg_3_mean = 5.0, seg_3_max = 5, seg_3_min = 5
     # This is how np.array_split([1,2,3,4,5], 3) works: array([1, 2]), array([3, 4]), array([5])
     # The code's logic for `calculate_segmented_features` seems to align with this.
+
+# --- Helper for result normalization ---
+def numerize_result(result_series, mapping={'OK': 0, 'NG': 1}):
+    """Converts a series of 'OK'/'NG' results to numerical values."""
+    if not isinstance(result_series, pd.Series):
+        result_series = pd.Series(result_series)
+    return result_series.map(mapping)
