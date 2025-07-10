@@ -65,7 +65,17 @@ def train_and_evaluate_model(X_train, X_test, y_train, y_test, model_name, featu
     models = {
         "Logistic Regression": LogisticRegression(random_state=42, solver='liblinear', class_weight='balanced'),
         "Random Forest": RandomForestClassifier(random_state=42, class_weight='balanced'),
-        "LightGBM": lgb.LGBMClassifier(random_state=42, class_weight='balanced')
+        "LightGBM": lgb.LGBMClassifier(
+            random_state=42,
+            class_weight='balanced',
+            n_estimators=200,      # Increased
+            learning_rate=0.05,    # Kept
+            num_leaves=25,         # Increased
+            min_child_samples=5,   # Decreased
+            min_split_gain=0.0,    # Kept
+            max_depth=7,           # Added
+            verbosity=-1           # Kept
+        )
     }
 
     if model_name not in models:
