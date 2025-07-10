@@ -12,15 +12,148 @@ sensor_df = generate_sensor_data()
 print("Sensor data generation complete. Application is ready.")
 
 import plotly.graph_objects as go # Import go for empty figure
+import dash_bootstrap_components as dbc # Import Dash Bootstrap Components
 
-# Initialize the Dash app
-app = dash.Dash(__name__)
+# Initialize the Dash app with a DBC theme
+# You can choose other themes from https://bootswatch.com/ or dbc.themes.
+# Examples: dbc.themes.FLATLY, dbc.themes.LUX, dbc.themes.MATERIA, dbc.themes.SANDSTONE etc.
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-# App layout
-app.layout = html.Div([
-    html.H1("Sensor Waveform Viewer"),
 
-    html.Div([
+# App layout using dbc.Container for better spacing and responsiveness
+app.layout = dbc.Container([
+    dbc.Row(dbc.Col(html.H1("Sensor Waveform Analysis Dashboard", className="text-center my-4"))),
+
+    dbc.Tabs([
+        dbc.Tab(label="Waveform Explorer & Feature Extraction", children=[
+            dbc.Row([ # Row for location and sensor dropdowns
+                dbc.Col([
+                    html.Label("Select Location ID:"),
+                    dcc.Dropdown(
+                        id='location-dropdown',
+                        options=[{'label': 'All Locations', 'value': 'all'}] + [{'label': loc, 'value': loc} for loc in sensor_df['location_id'].unique()],
+                        value='all',
+                        clearable=False
+                    ),
+                ], md=6),
+
+                dbc.Col([
+                    html.Label("Select Sensor ID(s):"),
+                    dcc.Dropdown(
+                        id='sensor-dropdown',
+                        options=[],
+                        value=[],
+                        multi=True
+                    ),
+                ], md=6),
+            ], className="mt-3"),
+
+            dbc.Row(dbc.Col(dcc.Graph(id='waveform-graph'), className="mt-3")),
+            dbc.Row(dbc.Col(html.Hr(), className="my-3")),
+
+            dbc.Row([
+                dbc.Col(html.H3("Feature Extraction Settings"), width=12, className="mb-3"),
+                dbc.Col([
+                    html.Label("Select Features:"),
+                    dcc.Checklist(
+                        id='feature-checklist',
+                        options=[
+                            {'label': 'Mean', 'value': 'mean'},
+                            {'label': 'Std Dev', 'value': 'std'}, # Shorter label
+                            {'label': 'Max', 'value': 'max'},     # Shorter label
+                            {'label': 'Min', 'value': 'min'},     # Shorter label
+                            {'label': 'RMS', 'value': 'rms'},
+                            {'label': 'Segmented Features', 'value': 'segmented_features'}
+                        ],
+                        value=[],
+                        labelStyle={'display': 'block'}
+                    ),
+                ], md=4),
+
+                dbc.Col([
+                    html.Label("Number of Segments (N):"),
+                    dcc.Input(
+                        id='n-segments-input', type='number', placeholder='Enter N', value=5,
+                        min=1, step=1, className="form-control", style={'display': 'block'}
+                    ),
+                ], id='n-segments-input-div', md=4, style={'display': 'inline-block'}),
+
+                dbc.Col([
+                    dbc.Button('Extract Features', id='extract-features-button', n_clicks=0, className="mt-4", color="primary")
+                ], md=4, className="d-flex align-items-end"),
+            ], className="mb-4"),
+        ]),
+
+        dbc.Tab(label="Feature Analysis", children=[
+            dbc.Row(dbc.Col(html.Div(id='feature-table-output'), width=12, className="mt-3")),
+            dbc.Row(dbc.Col(html.Hr(), className="my-3")),
+            dbc.Row([
+                dbc.Col(html.H3("Feature Visualization"), width=12, className="mb-3"),
+                dbc.Col([
+                    html.Label("Graph Type:"),
+                    dcc.Dropdown(
+                        id='feature-graph-type-dropdown',
+                        options=[
+                            {'label': 'Parallel Coordinates', 'value': 'parallel_coordinates'},
+                            {'label': 'Scatter Plot', 'value': 'scatter'}
+                        ],
+                        value='parallel_coordinates',
+                        clearable=False
+                    )
+                ], md=4),
+                dbc.Col([
+                    html.Label("X-axis Feature (Scatter):"),
+                    dcc.Dropdown(id='x-axis-feature-dropdown', options=[], placeholder="Select X-axis")
+                ], id='x-axis-div', md=4, style={'display': 'none'}),
+                dbc.Col([
+                    html.Label("Y-axis Feature (Scatter):"),
+                    dcc.Dropdown(id='y-axis-feature-dropdown', options=[], placeholder="Select Y-axis")
+                ], id='y-axis-div', md=4, style={'display': 'none'}),
+            ]),
+            dbc.Row(dbc.Col(dcc.Graph(id='feature-visualization-graph'), className="mt-3")),
+            dbc.Row(dbc.Col(html.Div(id='feature-stats-output', style={'marginTop': '20px', 'display': 'none'}), width=12)),
+            dbc.Row(dbc.Col(html.Hr(), className="my-3")),
+            dbc.Row([
+                dbc.Col(html.H3("Feature Correlation Heatmap"), width=12, className="mb-3"),
+                dbc.Col(dcc.Graph(id='feature-correlation-heatmap'), width=12)
+            ]),
+            dbc.Row(dbc.Col(dbc.Button("Download Extracted Features as CSV", id="btn-download-csv", className="mt-3 mb-3", color="success"), width=12)),
+        ]),
+
+        dbc.Tab(label="Machine Learning Analysis", children=[
+            dbc.Row([
+                dbc.Col(html.H3("Machine Learning Model Training & Evaluation"), width=12, className="my-3"),
+                dbc.Col([
+                    html.Label("Select Models to Train:"),
+                    dcc.Checklist(
+                        id='ml-model-checklist',
+                        options=[
+                            {'label': 'Logistic Regression', 'value': 'Logistic Regression'},
+                            {'label': 'Random Forest', 'value': 'Random Forest'},
+                            {'label': 'LightGBM', 'value': 'LightGBM'}
+                        ],
+                        value=['Logistic Regression'],
+                        labelStyle={'display': 'block'}
+                    ),
+                ], md=4),
+
+                dbc.Col([
+                    dbc.Button('Run ML Analysis', id='run-ml-analysis-button', n_clicks=0, className="mt-4", color="primary")
+                ], md=4, className="d-flex align-items-end"),
+            ], className="mb-4"),
+            dbc.Row(dbc.Col(
+                dcc.Loading(
+                    id="loading-ml-results", type="default",
+                    children=[html.Div(id='ml-results-output-area')]
+                ),
+                width=12, className="mt-3"
+            )),
+        ]),
+    ]),
+
+    dcc.Download(id="download-dataframe-csv"),
+    dcc.Store(id='extracted-features-store')
+], fluid=True)
         html.Label("Select Location ID:"),
         dcc.Dropdown(
             id='location-dropdown',
