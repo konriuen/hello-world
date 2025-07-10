@@ -160,9 +160,14 @@ app.layout = dbc.Container([
     [Input('feature-checklist', 'value')]
 )
 def toggle_n_segments_input(selected_features):
+    # Base style for the column, assuming md=4 is handled by className or parent
+    # We only toggle 'display'
+    base_style = {'width': '30%', 'display': 'inline-block', 'verticalAlign': 'top', 'marginLeft': '20px'} # Default style from previous version for consistency
     if selected_features and 'segmented_features' in selected_features:
-        return {'display': 'inline-block'} # Show
-    return {'display': 'none'} # Hide
+        base_style['display'] = 'block'
+    else:
+        base_style['display'] = 'none'
+    return base_style
 
 # Callback to extract features and store them
 @app.callback(
@@ -178,14 +183,14 @@ def toggle_n_segments_input(selected_features):
 def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
                               selected_features_names, n_segments, existing_store_data):
     if n_clicks == 0 or not selected_location or not selected_sensor_ids or not selected_features_names:
-        if n_clicks > 0:
+        if n_clicks > 0: # Button was clicked but some condition not met
             if not selected_location:
-                return existing_store_data, html.P("Please select a location.", style={'color': 'red'})
+                return existing_store_data, dbc.Alert("Please select a location.", color="danger", dismissable=True, duration=4000)
             if not selected_sensor_ids:
-                return existing_store_data, html.P("Please select at least one sensor.", style={'color': 'red'})
+                return existing_store_data, dbc.Alert("Please select at least one sensor.", color="danger", dismissable=True, duration=4000)
             if not selected_features_names:
-                return existing_store_data, html.P("Please select at least one feature to extract.", style={'color': 'red'})
-        return existing_store_data, "Feature data will appear here after extraction."
+                return existing_store_data, dbc.Alert("Please select at least one feature to extract.", color="danger", dismissable=True, duration=4000)
+        return existing_store_data, html.P("Feature data will appear here after extraction. Select options and click 'Extract Features'.")
 
     sensors_to_process = []
     if 'all' in selected_sensor_ids:
@@ -205,7 +210,7 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
         ]
 
     if wave_df_for_extraction.empty:
-        return [], html.P("No waveform data found for selected sensors and location to extract features.", style={'color': 'orange'})
+        return [], dbc.Alert("No waveform data found for selected sensors and location to extract features.", color="warning", dismissable=True, duration=4000)
 
     all_extracted_features = []
     for s_id in wave_df_for_extraction['sensor_id'].unique():
@@ -219,7 +224,7 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
 
         if selected_features_names and 'segmented_features' in selected_features_names:
             if current_n_segments is None or not isinstance(current_n_segments, int) or current_n_segments <= 0:
-                return existing_store_data, html.P(f"Invalid number of segments (N={current_n_segments}). Please provide a positive integer for N.", style={'color': 'red'})
+                return existing_store_data, dbc.Alert(f"Invalid number of segments (N={current_n_segments}). Please provide a positive integer for N.", color="danger", dismissable=True, duration=4000)
 
         features = calculate_waveform_features(
             series=sensor_waveform_data,
@@ -233,7 +238,7 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
         all_extracted_features.append(features)
 
     if not all_extracted_features:
-        return [], html.P("Could not extract features for the selected sensors/settings.", style={'color': 'orange'})
+        return [], dbc.Alert("Could not extract features for the selected sensors/settings.", color="warning", dismissable=True, duration=4000)
 
     features_df = pd.DataFrame(all_extracted_features)
 
@@ -274,7 +279,7 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
             }
         )
     else:
-        datatable_output = html.P("No features extracted or data is empty.", style={'marginTop': '20px'})
+        datatable_output = dbc.Alert("No features extracted or data is empty.", color="info", style={'marginTop': '20px'}, dismissable=True, duration=4000)
 
     return features_df.to_dict('records'), datatable_output
 
@@ -320,7 +325,7 @@ def update_feature_graph_and_stats(stored_feature_data, x_feature, y_feature, gr
 
     df = pd.DataFrame(stored_feature_data)
     if df.empty:
-        return empty_figure, html.P("No feature data available.")
+        return empty_figure, dbc.Alert("No feature data available for visualization.", color="info", dismissable=True, duration=4000)
 
     fig = empty_figure
     stats_output_content = []
@@ -333,7 +338,7 @@ def update_feature_graph_and_stats(stored_feature_data, x_feature, y_feature, gr
                 dimensions = [col for col in numeric_cols_for_parallel if col not in ['sensor_id', 'location_id']]
                 if not dimensions:
                     fig.update_layout(title_text="No numeric dimensions found for Parallel Coordinates plot.")
-                    return fig, html.P("No numeric dimensions for Parallel Coordinates.")
+                    return fig, dbc.Alert("No numeric dimensions for Parallel Coordinates.", color="warning", dismissable=True, duration=4000)
 
                 if 'result_numeric' in df.columns:
                      fig = px.parallel_coordinates(
@@ -346,15 +351,15 @@ def update_feature_graph_and_stats(stored_feature_data, x_feature, y_feature, gr
                     )
             else:
                 fig.update_layout(title_text="Not enough numeric data for Parallel Coordinates plot.")
-                stats_output_content = [html.P("Not enough data for Parallel Coordinates.")]
+                stats_output_content = [dbc.Alert("Not enough data for Parallel Coordinates.", color="warning", dismissable=True, duration=4000)]
 
         elif graph_type == 'scatter':
-            if not x_feature or not y_feature:
+            if not x_feature or not y_feature: # Check if features are selected for scatter
                 fig.update_layout(title_text="Please select X and Y features for Scatter Plot.")
-                return fig, html.P("Select X and Y features.")
-            if x_feature not in df.columns or y_feature not in df.columns:
+                return fig, dbc.Alert("Select X and Y features for Scatter Plot.", color="info", dismissable=True, duration=4000)
+            if x_feature not in df.columns or y_feature not in df.columns: # Check if selected features exist
                 fig.update_layout(title_text="Selected feature(s) not found.")
-                return fig, html.P("Selected feature(s) not found.")
+                return fig, dbc.Alert("Selected feature(s) not found in data.", color="warning", dismissable=True, duration=4000)
 
             fig = px.scatter(df, x=x_feature, y=y_feature, color='result',
                              title=f"Scatter Plot: {x_feature} vs {y_feature}",
@@ -372,15 +377,15 @@ def update_feature_graph_and_stats(stored_feature_data, x_feature, y_feature, gr
                 stats_output_content.append(html.H6("NG Group:"))
                 stats_output_content.append(html.Pre(ng_data.describe().to_string()))
             if ok_data.empty and ng_data.empty:
-                stats_output_content.append(html.P(f"No data for '{x_feature}' to calculate statistics."))
+                stats_output_content.append(dbc.Alert(f"No data for '{x_feature}' to calculate statistics.", color="info", dismissable=True, duration=4000))
         else:
             fig.update_layout(title_text="Invalid graph type selected.")
-            stats_output_content = [html.P("Select a valid graph type.")]
+            stats_output_content = [dbc.Alert("Select a valid graph type.", color="warning", dismissable=True, duration=4000)]
 
     except Exception as e:
         error_message = f"Error generating {graph_type} plot. Error: {str(e)}"
         fig.update_layout(title_text=error_message)
-        stats_output_content = [html.P(error_message, style={'color': 'red'})]
+        stats_output_content = [dbc.Alert(error_message, color="danger", dismissable=True, duration=4000)]
 
     if fig is not empty_figure:
         fig.update_layout(legend_title_text='Result')
@@ -395,14 +400,17 @@ def update_feature_graph_and_stats(stored_feature_data, x_feature, y_feature, gr
     [Input('feature-graph-type-dropdown', 'value')]
 )
 def toggle_axis_selectors_and_stats(graph_type):
-    scatter_style = {'display': 'inline-block'}
+    # Using dbc.Col's md parameter for width, so style only controls display here.
+    # The parent dbc.Col for these dropdowns already has md=4.
+    scatter_style_visible = {'width': '100%', 'display': 'block'} # Ensure full width of its Col, and visible
     stats_style_visible = {'marginTop': '20px', 'display': 'block'}
     hidden_style = {'display': 'none'}
 
     if graph_type == 'scatter':
-        return scatter_style, scatter_style, stats_style_visible
-    else:
+        return scatter_style_visible, scatter_style_visible, stats_style_visible
+    else: # For parallel_coordinates or any other type
         return hidden_style, hidden_style, hidden_style
+
 
 # Callback to generate feature correlation heatmap
 @app.callback(
@@ -448,31 +456,32 @@ def update_correlation_heatmap(stored_feature_data):
 def run_ml_analysis_and_display(n_clicks, stored_feature_data, selected_models):
     if n_clicks == 0 or not stored_feature_data or not selected_models:
         if n_clicks > 0 and not stored_feature_data:
-            return html.P("Please extract features first before running ML analysis.", style={'color': 'orange'})
+            return dbc.Alert("Please extract features first before running ML analysis.", color="warning", dismissable=True, duration=4000)
         if n_clicks > 0 and not selected_models:
-            return html.P("Please select at least one ML model to run.", style={'color': 'red'})
+            return dbc.Alert("Please select at least one ML model to run.", color="danger", dismissable=True, duration=4000)
         return html.P("ML Analysis results will appear here. Select models and click 'Run ML Analysis'.")
 
     df = pd.DataFrame(stored_feature_data)
     if df.empty or 'result_numeric' not in df.columns:
-        return html.P("Feature data is empty or 'result_numeric' column is missing.", style={'color': 'red'})
+        return dbc.Alert("Feature data is empty or 'result_numeric' column is missing.", color="danger", dismissable=True, duration=4000)
 
     X_train, X_test, y_train, y_test, feature_names, error_msg = ml_processor.preprocess_data(df.copy())
 
     if error_msg:
-        return html.P(f"Error during preprocessing: {error_msg}", style={'color': 'red'})
-    if X_train is None or X_test is None:
-        return html.P("Failed to preprocess data for ML analysis (unknown reason).", style={'color': 'red'})
+        return dbc.Alert(f"Error during preprocessing: {error_msg}", color="danger", dismissable=True, duration=4000)
+    if X_train is None or X_test is None: # Should be caught by error_msg but as a safeguard
+        return dbc.Alert("Failed to preprocess data for ML analysis (unknown reason).", color="danger", dismissable=True, duration=4000)
 
     results_children = []
     for model_name in selected_models:
-        results_children.append(html.H4(f"Results for: {model_name}"))
+        results_children.append(html.H4(f"Results for: {model_name}", className="mt-4"))
         model_results = ml_processor.train_and_evaluate_model(X_train, X_test, y_train, y_test, model_name, feature_names)
 
         if model_results.get("error"):
-            results_children.append(html.P(f"Error training/evaluating {model_name}: {model_results['error']}", style={'color': 'red'}))
+            results_children.append(dbc.Alert(f"Error training/evaluating {model_name}: {model_results['error']}", color="danger", dismissable=True, duration=4000))
             continue
 
+        # Feature Importances
         if model_results.get("feature_importances"):
             imp_df = pd.DataFrame(list(model_results["feature_importances"].items()), columns=['Feature', 'Importance']).sort_values(by="Importance", ascending=False)
             top_n = min(len(imp_df), 15)
@@ -480,6 +489,7 @@ def run_ml_analysis_and_display(n_clicks, stored_feature_data, selected_models):
             fig_imp.update_layout(yaxis={'categoryorder':'total ascending'})
             results_children.append(dcc.Graph(figure=fig_imp))
 
+        # Confusion Matrix
         cm = model_results.get("confusion_matrix")
         if cm:
             cm_array = np.array(cm)
@@ -491,24 +501,22 @@ def run_ml_analysis_and_display(n_clicks, stored_feature_data, selected_models):
             fig_cm.update_layout(xaxis_title="Predicted", yaxis_title="Actual")
             results_children.append(dcc.Graph(figure=fig_cm))
 
-        metrics = {
-            "Accuracy": model_results.get("accuracy"),
-            "Precision": model_results.get("precision"),
-            "Recall": model_results.get("recall"),
-            "F1 Score": model_results.get("f1_score"),
-            "ROC AUC": model_results.get("roc_auc")
+        # Metrics Table
+        metrics_data = { # Use f-string formatting here for consistency
+            "Accuracy": f"{model_results.get('accuracy', 0.0):.4f}",
+            "Precision": f"{model_results.get('precision', 0.0):.4f}",
+            "Recall": f"{model_results.get('recall', 0.0):.4f}",
+            "F1 Score": f"{model_results.get('f1_score', 0.0):.4f}",
+            "ROC AUC": f"{model_results.get('roc_auc', 0.0):.4f}"
         }
-        metrics_df = pd.DataFrame([metrics]).T.reset_index()
-        metrics_df.columns = ["Metric", "Value"]
-        metrics_table = dash_table.DataTable(
-            columns=[{"name": i, "id": i} for i in metrics_df.columns],
-            data=metrics_df.to_dict('records'),
-            style_cell={'textAlign': 'left'},
-            style_header={'fontWeight': 'bold'}
-        )
-        results_children.append(html.H5("Evaluation Metrics:"))
+        # metrics_df = pd.DataFrame([metrics_data]).T.reset_index() # This creates a DataFrame with one row
+        metrics_df = pd.DataFrame(list(metrics_data.items()), columns=["Metric", "Value"]) # Correct way for two columns
+
+        metrics_table = dbc.Table.from_dataframe(metrics_df, striped=True, bordered=True, hover=True, className="mt-3")
+        results_children.append(html.H5("Evaluation Metrics:", className="mt-3"))
         results_children.append(metrics_table)
 
+        # ROC Curve
         roc_data = model_results.get("roc_curve")
         if roc_data and roc_data.get("fpr") is not None and roc_data.get("tpr") is not None:
             fig_roc = go.Figure()
@@ -517,10 +525,10 @@ def run_ml_analysis_and_display(n_clicks, stored_feature_data, selected_models):
             fig_roc.update_layout(title='ROC Curve', xaxis_title='False Positive Rate', yaxis_title='True Positive Rate', legend=dict(x=0.6, y=0.1))
             results_children.append(dcc.Graph(figure=fig_roc))
 
-        results_children.append(html.Hr())
+        results_children.append(html.Hr(className="my-4"))
 
     if not results_children:
-        return html.P("No results to display. Check selections or data.", style={'color': 'orange'})
+        return dbc.Alert("No results to display. Check selections or data.", color="info", dismissable=True, duration=4000)
 
     return html.Div(results_children)
 
@@ -588,43 +596,53 @@ def update_graph(selected_location, selected_sensor_ids):
 
     actual_sensor_ids_to_filter = []
     if 'all' in selected_sensor_ids:
-        if selected_location != 'all':
+        if selected_location != 'all': # 'all' sensors for a specific location
              actual_sensor_ids_to_filter = list(sensor_df[sensor_df['location_id'] == selected_location]['sensor_id'].unique())
-    else:
+        # If selected_location is 'all' and 'all' sensors, no sensor ID filter is added to query_parts here
+    else: # Specific sensors selected
         actual_sensor_ids_to_filter = [sid for sid in selected_sensor_ids if sid != 'all']
 
-    if actual_sensor_ids_to_filter:
+    if actual_sensor_ids_to_filter: # Add sensor filter only if specific sensors are chosen or 'all' for specific location
          query_parts.append(f"sensor_id in {actual_sensor_ids_to_filter}")
 
     if query_parts:
         current_df = sensor_df.query(" and ".join(query_parts))
-    else:
+    else: # This means 'All Locations' and 'All Sensors'
         current_df = sensor_df.copy()
 
     if current_df.empty:
         fig = go.Figure()
-        fig.update_layout(title_text="No data found for selected criteria.")
+        fig.update_layout(title_text="No data found for selected criteria.",
+                          xaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]),
+                          yaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]))
         return fig
 
+    # Title Generation
     title_parts = []
     sensors_in_title = current_df['sensor_id'].unique()
-    if len(sensors_in_title) > 5:
-        for sid in sensors_in_title[:3]:
-            result = current_df[current_df['sensor_id'] == sid]['result'].iloc[0]
-            title_parts.append(f"{sid} ({result})")
-        title_parts.append(f"...and {len(sensors_in_title) - 3} more sensors")
+    if len(sensors_in_title) > 3: # Shorten if many sensors
+        title_parts = [f"{sensors_in_title[0]} ({current_df[current_df['sensor_id'] == sensors_in_title[0]]['result'].iloc[0]})",
+                       f"{sensors_in_title[1]} ({current_df[current_df['sensor_id'] == sensors_in_title[1]]['result'].iloc[0]})",
+                       f"...and {len(sensors_in_title) - 2} more"]
     else:
-        for sid in sensors_in_title:
-            result = current_df[current_df['sensor_id'] == sid]['result'].iloc[0]
-            title_parts.append(f"{sid} ({result})")
+        for sid_in_title in sensors_in_title: # Iterate over actual sensors in current_df for title
+            result = current_df[current_df['sensor_id'] == sid_in_title]['result'].iloc[0]
+            title_parts.append(f"{sid_in_title} ({result})")
 
     location_str = selected_location if selected_location != 'all' else "All Locations"
-    if 'all' in selected_sensor_ids:
-        sensors_str = "All Sensors"
+
+    # Refine sensors_str based on actual_sensor_ids_to_filter and selected_sensor_ids
+    if 'all' in selected_sensor_ids and not actual_sensor_ids_to_filter and selected_location == 'all':
+        sensors_str = "All Sensors (All Locations)"
+    elif 'all' in selected_sensor_ids and actual_sensor_ids_to_filter: # 'all' sensors for a specific location
+        sensors_str = "All Sensors in selected location"
+    elif not title_parts:
+        sensors_str = "None Selected / No Data"
     else:
         sensors_str = ", ".join(title_parts)
 
-    title = f"Waveforms for Location {location_str} - Sensors: {sensors_str}"
+    title = f"Waveforms for Location: {location_str} - Sensors: {sensors_str}"
+
 
     color_discrete_map = {}
     for sensor_id_val in current_df['sensor_id'].unique():
@@ -639,7 +657,7 @@ def update_graph(selected_location, selected_sensor_ids):
                   labels={'sensor_id': 'Sensor ID', 'value': 'Value', 'timestamp': 'Timestamp'},
                   color_discrete_map=color_discrete_map)
 
-    fig.update_layout(legend_title="Sensor ID")
+    fig.update_layout(legend_title_text='Sensor ID') # Changed from legend_title
     return fig
 
 if __name__ == '__main__':
