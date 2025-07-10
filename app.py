@@ -90,27 +90,28 @@ app.layout = html.Div([
     html.H3("Feature Visualization"),
     html.Div([
         html.Div([
-            html.Label("X-axis Feature:"),
-            dcc.Dropdown(id='x-axis-feature-dropdown', options=[], placeholder="Select X-axis feature")
-        ], style={'width': '30%', 'display': 'inline-block', 'marginRight': '10px'}),
-        html.Div([
-            html.Label("Y-axis Feature (for Scatter Plot):"),
-            dcc.Dropdown(id='y-axis-feature-dropdown', options=[], placeholder="Select Y-axis feature")
-        ], style={'width': '30%', 'display': 'inline-block', 'marginRight': '10px'}),
-        html.Div([
             html.Label("Graph Type:"),
             dcc.Dropdown(
                 id='feature-graph-type-dropdown',
                 options=[
-                    {'label': 'Histogram', 'value': 'histogram'},
+                    {'label': 'Parallel Coordinates', 'value': 'parallel_coordinates'},
                     {'label': 'Scatter Plot', 'value': 'scatter'}
                 ],
-                value='histogram' # Default graph type
+                value='parallel_coordinates', # Default graph type
+                clearable=False
             )
-        ], style={'width': '30%', 'display': 'inline-block'}),
+        ], style={'width': '30%', 'display': 'inline-block', 'marginRight': '10px'}),
+        html.Div([
+            html.Label("X-axis Feature (Scatter):"),
+            dcc.Dropdown(id='x-axis-feature-dropdown', options=[], placeholder="Select X-axis")
+        ], id='x-axis-div', style={'width': '30%', 'display': 'none', 'marginRight': '10px'}), # Initially hidden
+        html.Div([
+            html.Label("Y-axis Feature (Scatter):"),
+            dcc.Dropdown(id='y-axis-feature-dropdown', options=[], placeholder="Select Y-axis")
+        ], id='y-axis-div', style={'width': '30%', 'display': 'none'}), # Initially hidden
     ]),
     dcc.Graph(id='feature-visualization-graph'),
-    html.Div(id='feature-stats-output', style={'marginTop': '20px'}), # Div for stats output
+    html.Div(id='feature-stats-output', style={'marginTop': '20px', 'display': 'none'}), # Initially hidden
     html.Button("Download Extracted Features as CSV", id="btn-download-csv", style={'marginTop': '20px'}),
     dcc.Download(id="download-dataframe-csv"),
 
@@ -347,83 +348,134 @@ def update_feature_plot_dropdowns(stored_feature_data):
 )
 def update_feature_graph_and_stats(stored_feature_data, x_feature, y_feature, graph_type):
     empty_figure = go.Figure()
-    empty_figure.update_layout(title_text="Extract features and select X-axis to generate a graph.",
+    empty_figure.update_layout(title_text="Extract features and select graph type/options.",
                                xaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]),
                                yaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]))
     empty_stats = html.P("")
 
-    if not stored_feature_data or not x_feature:
+    if not stored_feature_data:
         return empty_figure, empty_stats
 
     df = pd.DataFrame(stored_feature_data)
+    if df.empty:
+        return empty_figure, html.P("No feature data available.")
 
-    if x_feature not in df.columns:
-        fig_error = go.Figure()
-        fig_error.update_layout(title_text=f"X-axis feature '{x_feature}' not found in extracted data.",
-                                xaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]),
-                                yaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]))
-        return fig_error, empty_stats
-    if graph_type == 'scatter' and (not y_feature or y_feature not in df.columns):
-        fig_error = go.Figure()
-        fig_error.update_layout(title_text=f"Y-axis feature '{y_feature}' not found or not selected for scatter plot.",
-                                xaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]),
-                                yaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]))
-        return fig_error, empty_stats
-
-    fig_title = ""
-    fig = empty_figure # Initialize fig with a valid empty figure
-    stats_output = []
+    fig = empty_figure
+    stats_output_content = []
 
     try:
-        if graph_type == 'histogram':
-            fig_title = f"Histogram of {x_feature}"
-            fig = px.histogram(df, x=x_feature, color='result',
-                               marginal="box", barmode='overlay', title=fig_title,
-                               color_discrete_map={"OK": "green", "NG": "red"})
+        if graph_type == 'parallel_coordinates':
+            numeric_cols_for_parallel = df.select_dtypes(include=np.number).columns.tolist()
+            # Optionally remove 'result_numeric' if it's just a duplicate of 'result' for coloring
+            # or keep it if its scale is meaningful with other features.
+            # For now, let's assume all numeric columns are valid dimensions.
+            # However, 'result_numeric' might dominate the color scale if not handled.
+            # px.parallel_coordinates uses the color column also as a dimension by default.
 
-            # Calculate and display stats for histogram's x_feature
-            stats_output.append(html.H5(f"Descriptive Statistics for '{x_feature}':"))
+            if 'result_numeric' in numeric_cols_for_parallel and len(numeric_cols_for_parallel) > 1:
+                 # We want to color by 'result' (categorical) not 'result_numeric' if possible,
+                 # or ensure 'result_numeric' is treated as categorical for coloring if used.
+                 # For px.parallel_coordinates, 'color' should be a column in 'dimensions'.
+                 # If 'result' is not numeric, we can't directly use it for color in the same way as numeric dimensions.
+                 # One way is to map 'result' to a plottable numeric value if not already, or use 'result_numeric'.
+
+                # Let's use result_numeric for coloring if available, and ensure it's part of dimensions.
+                # If result_numeric is used for color, it will also be one of the axes.
+                # We could also create a specific color-mapping for 'result' (OK/NG) if needed and map it to integers.
+
+                # Select dimensions - all numeric features + result_numeric for coloring
+                dimensions = [col for col in numeric_cols_for_parallel if col not in ['sensor_id', 'location_id']] # Keep original result out
+
+                if not dimensions:
+                    fig.update_layout(title_text="No numeric dimensions found for Parallel Coordinates plot.")
+                    return fig, html.P("No numeric dimensions for Parallel Coordinates.")
+
+                fig = px.parallel_coordinates(
+                    df,
+                    dimensions=dimensions,
+                    color="result_numeric", # Use the numeric version for color scale
+                    color_continuous_scale=px.colors.diverging.Tealrose, # Example color scale
+                    # labels={"result_numeric": "Result"}, # Label for the color legend
+                    title="Parallel Coordinates Plot of Features"
+                )
+                # Modify the color axis to show OK/NG if possible, or use a specific colorscale.
+                # For 'result' (OK/NG) coloring, it's often better to map OK/NG to 0/1 and use a discrete color map.
+                # Since we have 'result_numeric' (OK=0, NG=1), this should work with a custom colorscale.
+                # However, px.parallel_coordinates treats 'color' as continuous by default if the column is numeric.
+                # A workaround for discrete colors might involve custom trace generation or a feature request to Plotly.
+                # For now, it will use a continuous scale based on result_numeric (0 and 1).
+                # To make it more distinct for 0 and 1:
+                if 'result_numeric' in df.columns:
+                     fig = px.parallel_coordinates(
+                        df,
+                        dimensions=dimensions,
+                        color="result_numeric",
+                        color_continuous_scale=[(0, "green"), (1, "red")], # OK=green, NG=red
+                        labels={col: col.replace("_", " ").title() for col in dimensions},
+                        title="Parallel Coordinates Plot of Features (OK: Green, NG: Red)"
+                    )
+
+            else:
+                fig.update_layout(title_text="Not enough numeric data for Parallel Coordinates plot (or result_numeric missing).")
+                stats_output_content = [html.P("Not enough data for Parallel Coordinates.")]
+
+        elif graph_type == 'scatter':
+            if not x_feature or not y_feature:
+                fig.update_layout(title_text="Please select X and Y features for Scatter Plot.")
+                return fig, html.P("Select X and Y features.")
+            if x_feature not in df.columns or y_feature not in df.columns:
+                fig.update_layout(title_text="Selected feature(s) not found.")
+                return fig, html.P("Selected feature(s) not found.")
+
+            fig = px.scatter(df, x=x_feature, y=y_feature, color='result',
+                             title=f"Scatter Plot: {x_feature} vs {y_feature}",
+                             color_discrete_map={"OK": "green", "NG": "red"},
+                             hover_data=['sensor_id', 'location_id'])
+
+            # Calculate and display stats for scatter plot's x_feature
+            stats_output_content.append(html.H5(f"Descriptive Statistics for '{x_feature}':"))
             ok_data = df[(df['result'] == 'OK') & pd.notna(df[x_feature])][x_feature]
             ng_data = df[(df['result'] == 'NG') & pd.notna(df[x_feature])][x_feature]
 
             if not ok_data.empty:
-                stats_output.append(html.H6("OK Group:"))
-                stats_output.append(html.Pre(ok_data.describe().to_string()))
+                stats_output_content.append(html.H6("OK Group:"))
+                stats_output_content.append(html.Pre(ok_data.describe().to_string()))
             if not ng_data.empty:
-                stats_output.append(html.H6("NG Group:"))
-                stats_output.append(html.Pre(ng_data.describe().to_string()))
+                stats_output_content.append(html.H6("NG Group:"))
+                stats_output_content.append(html.Pre(ng_data.describe().to_string()))
             if ok_data.empty and ng_data.empty:
-                stats_output.append(html.P("No data available for statistics."))
-
-        elif graph_type == 'scatter':
-            if not y_feature:
-                 return px.line(title="Please select a Y-axis feature for the scatter plot."), empty_stats
-            fig_title = f"Scatter Plot: {x_feature} vs {y_feature}"
-            fig = px.scatter(df, x=x_feature, y=y_feature, color='result', title=fig_title,
-                             color_discrete_map={"OK": "green", "NG": "red"},
-                             hover_data=['sensor_id', 'location_id'])
-            # For scatter, could show stats for X and Y separately if desired, or correlation.
-            # For now, let's keep it simple and only show stats if histogram is chosen.
-            stats_output.append(html.P("Descriptive statistics are shown for Histogram view."))
+                stats_output_content.append(html.P(f"No data for '{x_feature}' to calculate statistics."))
         else:
-            fig = go.Figure()
-            fig.update_layout(title_text="Invalid graph type selected.",
-                              xaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]),
-                              yaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]))
-            stats_output = html.P("Select a valid graph type.")
+            fig.update_layout(title_text="Invalid graph type selected.")
+            stats_output_content = [html.P("Select a valid graph type.")]
 
     except Exception as e:
-        error_message = f"Error generating {graph_type} for {x_feature}" + \
-                        (f" vs {y_feature}" if y_feature and graph_type == 'scatter' else "") + \
-                        f". Check data. Error: {str(e)}"
-        fig_error = go.Figure()
-        fig_error.update_layout(title_text=error_message,
-                                xaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]),
-                                yaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]))
-        return fig_error, html.P(error_message, style={'color': 'red'})
+        error_message = f"Error generating {graph_type} plot. Error: {str(e)}"
+        fig.update_layout(title_text=error_message)
+        stats_output_content = [html.P(error_message, style={'color': 'red'})]
 
-    fig.update_layout(legend_title_text='Result')
-    return fig, html.Div(stats_output)
+    if fig is not empty_figure: # Only update legend if fig was actually created
+        fig.update_layout(legend_title_text='Result')
+
+    return fig, html.Div(stats_output_content)
+
+# Callback to control visibility of X/Y axis dropdowns and stats output
+@app.callback(
+    Output('x-axis-div', 'style'),
+    Output('y-axis-div', 'style'),
+    Output('feature-stats-output', 'style'), # Control visibility of stats output
+    [Input('feature-graph-type-dropdown', 'value')]
+)
+def toggle_axis_selectors_and_stats(graph_type):
+    scatter_style = {'width': '30%', 'display': 'inline-block', 'marginRight': '10px'}
+    stats_style_visible = {'marginTop': '20px', 'display': 'block'}
+    hidden_style = {'display': 'none'}
+
+    if graph_type == 'scatter':
+        return scatter_style, scatter_style, stats_style_visible
+    else: # For parallel_coordinates or any other type
+        return hidden_style, hidden_style, hidden_style
+
 
 # Callback to generate feature correlation heatmap
 @app.callback(
