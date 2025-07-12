@@ -56,15 +56,32 @@ app.layout = dbc.Container([
                     dcc.Checklist(
                         id='feature-checklist',
                         options=[
+                            # Basic
                             {'label': 'Mean', 'value': 'mean'},
                             {'label': 'Std Dev', 'value': 'std'},
                             {'label': 'Max', 'value': 'max'},
                             {'label': 'Min', 'value': 'min'},
                             {'label': 'RMS', 'value': 'rms'},
-                            {'label': 'Segmented Features', 'value': 'segmented_features'}
+                            # General
+                            {'label': 'Skewness', 'value': 'skewness'},
+                            {'label': 'Kurtosis', 'value': 'kurtosis'},
+                            {'label': 'Peak Count', 'value': 'num_peaks'},
+                            {'label': 'Zero Crossings', 'value': 'num_zero_crossings'},
+                            {'label': 'Mean Abs. Change', 'value': 'mean_abs_change'},
+                            # Segmented
+                            {'label': 'Segmented Features', 'value': 'segmented_features'},
+                            # TSFRESH based
+                            {'label': 'TSF: Abs. Energy', 'value': 'tsf_abs_energy'},
+                            {'label': 'TSF: CID CE (norm)', 'value': 'tsf_cid_ce'},
+                            {'label': 'TSF: Quantile 0.25', 'value': 'tsf_quantile_0.25'},
+                            {'label': 'TSF: Quantile 0.75', 'value': 'tsf_quantile_0.75'},
+                            {'label': 'TSF: Autocorr lag 1', 'value': 'tsf_autocorrelation_lag1'},
+                            {'label': 'TSF: Autocorr lag 2', 'value': 'tsf_autocorrelation_lag2'},
+                            {'label': 'TSF: Mean Slope (chunks)', 'value': 'tsf_agg_linear_trend_slope_mean'},
                         ],
-                        value=[],
-                        labelStyle={'display': 'block'}
+                        value=['mean', 'std'], # Default to a few common ones
+                        labelStyle={'display': 'block'},
+                        inputClassName="mb-1" # Margin bottom for each checklist item
                     ),
                 ], md=4),
 

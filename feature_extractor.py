@@ -22,6 +22,50 @@ def calculate_rms(series):
     """Calculates the Root Mean Square (RMS) of a series."""
     return np.sqrt(np.mean(series**2))
 
+def calculate_skewness(series):
+    """Calculates the skewness of a series."""
+    if series.empty: return np.nan
+    return pd.Series(series).skew()
+
+def calculate_kurtosis(series):
+    """Calculates the kurtosis of a series."""
+    if series.empty: return np.nan
+    return pd.Series(series).kurtosis()
+
+def calculate_num_peaks(series, prominence=None, height=None, distance=None):
+    """
+    Calculates the number of peaks in a series.
+    Uses scipy.signal.find_peaks.
+    Prominence, height, distance can be used to refine peak detection.
+    For simplicity, using basic peak detection if not specified.
+    """
+    if series.empty: return 0 # Or np.nan if preferred for consistency
+    try:
+        from scipy.signal import find_peaks
+        # Ensure series is numpy array for find_peaks
+        series_np = np.asarray(series)
+        peaks, _ = find_peaks(series_np, prominence=prominence, height=height, distance=distance)
+        return len(peaks)
+    except ImportError:
+        # print("SciPy not installed. Cannot calculate number of peaks.")
+        return np.nan # Indicate that feature couldn't be calculated
+    except Exception: # Catch other potential errors from find_peaks
+        return np.nan
+
+
+def calculate_num_zero_crossings(series):
+    """Calculates the number of zero crossings in a series."""
+    if series.empty: return 0 # Or np.nan
+    # Ensure series is numpy array
+    series_np = np.asarray(series)
+    return len(np.where(np.diff(np.sign(series_np)))[0])
+
+def calculate_mean_abs_change(series):
+    """Calculates the mean of the absolute differences between successive values."""
+    if len(series) < 2: return np.nan # Need at least two points to calculate a change
+    return np.mean(np.abs(np.diff(series)))
+
+
 # --- Segmented Features ---
 def calculate_segmented_features(series, n_segments):
     """
@@ -67,6 +111,88 @@ def calculate_segmented_features(series, n_segments):
 
     return features
 
+# --- TSFRESH Individual Feature Wrappers ---
+# Note: tsfresh functions typically expect a pandas Series.
+# These functions are defined before they are added to AVAILABLE_FEATURES and used in __main__
+
+def tsf_abs_energy(series):
+    if series.empty: return np.nan
+    try:
+        from tsfresh.feature_extraction.feature_calculators import abs_energy
+        return abs_energy(series)
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_cid_ce(series):
+    if series.empty: return np.nan
+    try:
+        from tsfresh.feature_extraction.feature_calculators import cid_ce
+        return cid_ce(series, normalize=True)
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_quantile_025(series):
+    if series.empty: return np.nan
+    try:
+        from tsfresh.feature_extraction.feature_calculators import quantile
+        return quantile(series, q=0.25)
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_quantile_075(series):
+    if series.empty: return np.nan
+    try:
+        from tsfresh.feature_extraction.feature_calculators import quantile
+        return quantile(series, q=0.75)
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_autocorrelation_lag1(series):
+    if series.empty or len(series) < 2: return np.nan # Autocorrelation needs sufficient length
+    try:
+        from tsfresh.feature_extraction.feature_calculators import autocorrelation
+        val = autocorrelation(series, lag=1)
+        return val if pd.notna(val) else np.nan
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_autocorrelation_lag2(series):
+    if series.empty or len(series) < 3: return np.nan
+    try:
+        from tsfresh.feature_extraction.feature_calculators import autocorrelation
+        val = autocorrelation(series, lag=2)
+        return val if pd.notna(val) else np.nan
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_agg_linear_trend_slope_mean(series, chunk_len=5):
+    if series.empty or len(series) < chunk_len * 2 :
+        return np.nan
+    try:
+        # Simplified approach for single series mean slope of chunks
+        num_chunks = len(series) // chunk_len
+        if num_chunks < 1: return np.nan
+        slopes = []
+        for i in range(num_chunks):
+            chunk = series[i*chunk_len : (i+1)*chunk_len]
+            if len(chunk) < 2: continue
+
+            chunk_numeric = pd.Series(chunk).dropna()
+            if len(chunk_numeric) < 2: continue
+
+            x_chunk_numeric = np.arange(len(chunk_numeric))
+            try:
+                if chunk_numeric.var() == 0:
+                    slopes.append(0.0)
+                else:
+                    slope, _ = np.polyfit(x_chunk_numeric, chunk_numeric, 1)
+                    slopes.append(slope)
+            except (np.linalg.LinAlgError, ValueError):
+                continue
+        return np.mean(slopes) if slopes else np.nan
+    except ImportError: return np.nan # Should not happen if tsfresh is installed
+    except Exception: return np.nan
+
 # --- Feature Extractor Dispatcher ---
 # This dictionary maps feature names (as they might be selected in UI) to functions
 AVAILABLE_FEATURES = {
@@ -75,6 +201,19 @@ AVAILABLE_FEATURES = {
     "max": calculate_max,
     "min": calculate_min,
     "rms": calculate_rms,
+    "skewness": calculate_skewness,
+    "kurtosis": calculate_kurtosis,
+    "num_peaks": calculate_num_peaks, # Default peak parameters
+    "num_zero_crossings": calculate_num_zero_crossings,
+    "mean_abs_change": calculate_mean_abs_change,
+    # TSFRESH features
+    "tsf_abs_energy": tsf_abs_energy,
+    "tsf_cid_ce": tsf_cid_ce,
+    "tsf_quantile_0.25": tsf_quantile_025, # Use dot for UI consistency if needed, or underscore
+    "tsf_quantile_0.75": tsf_quantile_075,
+    "tsf_autocorrelation_lag1": tsf_autocorrelation_lag1,
+    "tsf_autocorrelation_lag2": tsf_autocorrelation_lag2,
+    "tsf_agg_linear_trend_slope_mean": tsf_agg_linear_trend_slope_mean,
     # "segmented_features" is a special case handled separately due to n_segments
 }
 
@@ -244,6 +383,157 @@ if __name__ == '__main__':
     # seg_3_mean = 5.0, seg_3_max = 5, seg_3_min = 5
     # This is how np.array_split([1,2,3,4,5], 3) works: array([1, 2]), array([3, 4]), array([5])
     # The code's logic for `calculate_segmented_features` seems to align with this.
+
+    print("\n--- Testing New General Features ---")
+    new_features_to_test = ["skewness", "kurtosis", "num_peaks", "num_zero_crossings", "mean_abs_change"]
+
+    print("Short Series:")
+    features_new_short = extract_features(sample_series_short, new_features_to_test)
+    print(features_new_short)
+    # Expected for sample_series_short = pd.Series([1, 2, 3, 4, 5]):
+    # skewness: 0.0
+    # kurtosis: -1.2 (using Fisher definition, pandas default)
+    # num_peaks: 1 (if simple peak at 3, or 0 if ends are not peaks) -> scipy default find_peaks might find 0 if no clear peak relative to neighbors.
+    #            For [1,2,5,4,3] -> peak at 5. For monotonic, depends on definition.
+    #            Let's test with [1,2,5,2,1] -> num_peaks should be 1.
+    #            For [1,2,3,2,1,4,1] -> num_peaks should be 2.
+    # num_zero_crossings: 0 (if all positive)
+    # mean_abs_change: 1.0
+
+    series_with_peaks = pd.Series([1,2,5,2,1,6,3,6,2,7])
+    print("Series with Peaks ([1,2,5,2,1,6,3,6,2,7]):")
+    features_peaks = extract_features(series_with_peaks, ["num_peaks"])
+    print(features_peaks) # Expect num_peaks = 4 (at 5, 6, 6, 7) with default params
+
+    series_with_crossings = pd.Series([1, 2, -1, -2, 3, -3])
+    print("Series with Zero Crossings ([1, 2, -1, -2, 3, -3]):")
+    features_crossings = extract_features(series_with_crossings, ["num_zero_crossings"])
+    print(features_crossings) # Expect 3 crossings
+
+    print("Long Series (random):")
+    features_new_long = extract_features(sample_series_long, new_features_to_test)
+    print(features_new_long)
+
+    print("Empty Series:")
+    features_new_empty = extract_features(empty_series, new_features_to_test)
+    print(features_new_empty)
+    # Expected: skewness=nan, kurtosis=nan, num_peaks=0 or nan, num_zero_crossings=0 or nan, mean_abs_change=nan
+
+    print("\n--- Testing TSFRESH Features ---")
+    tsfresh_features_to_test = [
+        "tsf_abs_energy", "tsf_cid_ce", "tsf_quantile_0.25",
+        "tsf_quantile_0.75", "tsf_autocorrelation_lag1",
+        "tsf_autocorrelation_lag2", "tsf_agg_linear_trend_slope_mean"
+    ]
+    print("Long Series (random):")
+    features_tsf_long = extract_features(sample_series_long, tsfresh_features_to_test)
+    print(features_tsf_long)
+
+    print("Short Series ([1, 2, 3, 4, 5]):")
+    features_tsf_short = extract_features(sample_series_short, tsfresh_features_to_test)
+    print(features_tsf_short)
+    # abs_energy: 1+4+9+16+25 = 55
+    # cid_ce: needs more variability to be meaningful.
+    # quantile_0.25: 2.0
+    # quantile_0.75: 4.0
+    # autocorrelation_lag1: depends on variance, for [1,2,3,4,5] variance is not 0.
+    # agg_linear_trend_slope_mean: chunk_len=5, only one chunk. Slope is 1.0.
+    #    If series is shorter than 2*chunk_len (10), it might return NaN. Let's check.
+    #    With current chunk_len=5, it should be NaN.
+    #    Let's test tsf_agg_linear_trend_slope_mean with specific chunk_len that fits.
+    print("Short Series for agg_linear_trend (chunk_len=2):") # Needs len >= 4
+    short_series_for_agg = pd.Series([1,2,3,4,5,6])
+    val_agg_trend = tsf_agg_linear_trend_slope_mean(short_series_for_agg, chunk_len=2)
+    print(f"tsf_agg_linear_trend_slope_mean (chunk_len=2) for [1,2,3,4,5,6]: {val_agg_trend}")
+    # Chunks: [1,2], [3,4], [5,6]. Slopes: 1, 1, 1. Mean: 1.
+
+    print("Empty Series (tsfresh):")
+    features_tsf_empty = extract_features(empty_series, tsfresh_features_to_test)
+    print(features_tsf_empty)
+    # Expected: skewness=nan, kurtosis=nan, num_peaks=0 or nan, num_zero_crossings=0 or nan, mean_abs_change=nan
+
+# --- TSFRESH Individual Feature Wrappers ---
+# Note: tsfresh functions typically expect a pandas Series.
+# These functions are defined before they are added to AVAILABLE_FEATURES and used in __main__
+
+def tsf_abs_energy(series):
+    if series.empty: return np.nan
+    try:
+        from tsfresh.feature_extraction.feature_calculators import abs_energy
+        return abs_energy(series)
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_cid_ce(series):
+    if series.empty: return np.nan
+    try:
+        from tsfresh.feature_extraction.feature_calculators import cid_ce
+        return cid_ce(series, normalize=True)
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_quantile_025(series):
+    if series.empty: return np.nan
+    try:
+        from tsfresh.feature_extraction.feature_calculators import quantile
+        return quantile(series, q=0.25)
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_quantile_075(series):
+    if series.empty: return np.nan
+    try:
+        from tsfresh.feature_extraction.feature_calculators import quantile
+        return quantile(series, q=0.75)
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_autocorrelation_lag1(series):
+    if series.empty or len(series) < 2: return np.nan # Autocorrelation needs sufficient length
+    try:
+        from tsfresh.feature_extraction.feature_calculators import autocorrelation
+        val = autocorrelation(series, lag=1)
+        return val if pd.notna(val) else np.nan
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_autocorrelation_lag2(series):
+    if series.empty or len(series) < 3: return np.nan
+    try:
+        from tsfresh.feature_extraction.feature_calculators import autocorrelation
+        val = autocorrelation(series, lag=2)
+        return val if pd.notna(val) else np.nan
+    except ImportError: return np.nan
+    except Exception: return np.nan
+
+def tsf_agg_linear_trend_slope_mean(series, chunk_len=5):
+    if series.empty or len(series) < chunk_len * 2 :
+        return np.nan
+    try:
+        # Simplified approach for single series mean slope of chunks
+        num_chunks = len(series) // chunk_len
+        if num_chunks < 1: return np.nan
+        slopes = []
+        for i in range(num_chunks):
+            chunk = series[i*chunk_len : (i+1)*chunk_len]
+            if len(chunk) < 2: continue
+
+            chunk_numeric = pd.Series(chunk).dropna()
+            if len(chunk_numeric) < 2: continue
+
+            x_chunk_numeric = np.arange(len(chunk_numeric))
+            try:
+                if chunk_numeric.var() == 0:
+                    slopes.append(0.0)
+                else:
+                    slope, _ = np.polyfit(x_chunk_numeric, chunk_numeric, 1)
+                    slopes.append(slope)
+            except (np.linalg.LinAlgError, ValueError):
+                continue
+        return np.mean(slopes) if slopes else np.nan
+    except ImportError: return np.nan # Should not happen if tsfresh is installed
+    except Exception: return np.nan
+
 
 # --- Helper for result normalization ---
 def numerize_result(result_series, mapping={'OK': 0, 'NG': 1}):
