@@ -100,7 +100,15 @@ app.layout = dbc.Container([
         ]),
 
         dbc.Tab(label="Feature Analysis", children=[
-            dbc.Row(dbc.Col(html.Div(id='feature-table-output'), width=12, className="mt-3")),
+            dbc.Row(dbc.Col(html.Div(id='feature-extraction-notification'), width=12, className="mt-3")), # Notification area
+            dbc.Row(dbc.Col(
+                dcc.Loading(
+                    id="loading-feature-table",
+                    type="default",
+                    children=[html.Div(id='feature-table-output')]
+                ),
+                width=12
+            )),
             dbc.Row(dbc.Col(html.Hr(), className="my-3")),
             dbc.Row([
                 dbc.Col(html.H3("Feature Visualization"), width=12, className="mb-3"),
@@ -190,6 +198,7 @@ def toggle_n_segments_input(selected_features):
 @app.callback(
     Output('extracted-features-store', 'data'),
     Output('feature-table-output', 'children'),
+    Output('feature-extraction-notification', 'children'), # New output for notifications
     [Input('extract-features-button', 'n_clicks')],
     [State('location-dropdown', 'value'),
      State('sensor-dropdown', 'value'),
@@ -199,16 +208,23 @@ def toggle_n_segments_input(selected_features):
 )
 def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
                               selected_features_names, n_segments, existing_store_data):
-    if n_clicks == 0 or not selected_location or not selected_sensor_ids or not selected_features_names:
-        if n_clicks > 0: # Button was clicked but some condition not met
-            if not selected_location:
-                return existing_store_data, dbc.Alert("Please select a location.", color="danger", dismissable=True, duration=4000)
-            if not selected_sensor_ids:
-                return existing_store_data, dbc.Alert("Please select at least one sensor.", color="danger", dismissable=True, duration=4000)
-            if not selected_features_names:
-                return existing_store_data, dbc.Alert("Please select at least one feature to extract.", color="danger", dismissable=True, duration=4000)
-        return existing_store_data, html.P("Feature data will appear here after extraction. Select options and click 'Extract Features'.")
+    if n_clicks == 0:
+        return existing_store_data, html.P("Feature data will appear here after extraction. Select options and click 'Extract Features'."), "" # No notification initially
 
+    # Handle validation errors by returning an alert to the notification area
+    if not selected_location:
+        return existing_store_data, dash.no_update, dbc.Alert("Please select a location.", color="danger", dismissable=True)
+    if not selected_sensor_ids:
+        return existing_store_data, dash.no_update, dbc.Alert("Please select at least one sensor.", color="danger", dismissable=True)
+    if not selected_features_names:
+        return existing_store_data, dash.no_update, dbc.Alert("Please select at least one feature to extract.", color="danger", dismissable=True)
+
+    # Validate N for segmented features
+    if 'segmented_features' in selected_features_names:
+        if n_segments is None or not isinstance(n_segments, int) or n_segments <= 0:
+            return existing_store_data, dash.no_update, dbc.Alert(f"Invalid number of segments (N={n_segments}). Please provide a positive integer.", color="danger", dismissable=True)
+
+    # Determine sensors to process
     sensors_to_process = []
     if 'all' in selected_sensor_ids:
         if selected_location == 'all':
@@ -218,6 +234,7 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
     else:
         sensors_to_process = [sid for sid in selected_sensor_ids if sid != 'all']
 
+    # Filter waveform data
     if selected_location == 'all':
         wave_df_for_extraction = sensor_df[sensor_df['sensor_id'].isin(sensors_to_process)]
     else:
@@ -227,42 +244,31 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
         ]
 
     if wave_df_for_extraction.empty:
-        return [], dbc.Alert("No waveform data found for selected sensors and location to extract features.", color="warning", dismissable=True, duration=4000)
+        return [], dash.no_update, dbc.Alert("No waveform data found for selected sensors and location.", color="warning", dismissable=True)
 
+    # --- Feature Extraction Logic ---
     all_extracted_features = []
     for s_id in wave_df_for_extraction['sensor_id'].unique():
         sensor_waveform_data = wave_df_for_extraction[wave_df_for_extraction['sensor_id'] == s_id]['value']
-        actual_loc_id = wave_df_for_extraction[wave_df_for_extraction['sensor_id'] == s_id]['location_id'].iloc[0]
-
-        if sensor_waveform_data.empty:
-            continue
-
-        current_n_segments = n_segments if selected_features_names and 'segmented_features' in selected_features_names else None
-
-        if selected_features_names and 'segmented_features' in selected_features_names:
-            if current_n_segments is None or not isinstance(current_n_segments, int) or current_n_segments <= 0:
-                return existing_store_data, dbc.Alert(f"Invalid number of segments (N={current_n_segments}). Please provide a positive integer for N.", color="danger", dismissable=True, duration=4000)
+        if sensor_waveform_data.empty: continue
 
         features = calculate_waveform_features(
             series=sensor_waveform_data,
             selected_feature_names=selected_features_names,
-            n_segments=current_n_segments
+            n_segments=n_segments # Pass N regardless, function will ignore if not needed
         )
 
         features['sensor_id'] = s_id
-        features['location_id'] = actual_loc_id
+        features['location_id'] = wave_df_for_extraction[wave_df_for_extraction['sensor_id'] == s_id]['location_id'].iloc[0]
         features['result'] = wave_df_for_extraction[wave_df_for_extraction['sensor_id'] == s_id]['result'].iloc[0]
         all_extracted_features.append(features)
 
     if not all_extracted_features:
-        return [], dbc.Alert("Could not extract features for the selected sensors/settings.", color="warning", dismissable=True, duration=4000)
+        return [], dash.no_update, dbc.Alert("Could not extract features for the selected sensors/settings.", color="warning", dismissable=True)
 
     features_df = pd.DataFrame(all_extracted_features)
-
     if not features_df.empty:
         features_df['result_numeric'] = numerize_result(features_df['result'])
-
-    if not features_df.empty:
         id_cols = ['location_id', 'sensor_id', 'result', 'result_numeric']
         present_id_cols = [col for col in id_cols if col in features_df.columns]
         feature_col_names = sorted([col for col in features_df.columns if col not in present_id_cols])
@@ -271,34 +277,21 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
 
         datatable_output = dash_table.DataTable(
             id='interactive-feature-table',
-            columns=[{"name": i, "id": i, "deletable": False, "selectable": True} for i in features_df_ordered.columns],
+            columns=[{"name": i, "id": i} for i in features_df_ordered.columns],
             data=features_df_ordered.to_dict('records'),
-            editable=False,
-            filter_action="native",
-            sort_action="native",
-            sort_mode="multi",
-            row_selectable="multi",
-            row_deletable=False,
-            selected_rows=[],
-            page_action="native",
-            page_current=0,
-            page_size=10,
+            page_action="native", page_current=0, page_size=10,
+            filter_action="native", sort_action="native", sort_mode="multi",
             style_table={'overflowX': 'auto', 'marginTop': '20px'},
-            style_cell={
-                'height': 'auto',
-                'minWidth': '90px', 'width': '120px', 'maxWidth': '180px',
-                'whiteSpace': 'normal',
-                'textAlign': 'left'
-            },
-            style_header={
-                'backgroundColor': 'rgb(230, 230, 230)',
-                'fontWeight': 'bold'
-            }
+            style_header={'backgroundColor': 'rgb(230, 230, 230)', 'fontWeight': 'bold'},
+            style_cell={'height': 'auto', 'minWidth': '90px', 'width': '120px', 'maxWidth': '180px', 'whiteSpace': 'normal', 'textAlign': 'left'}
         )
     else:
-        datatable_output = dbc.Alert("No features extracted or data is empty.", color="info", style={'marginTop': '20px'}, dismissable=True, duration=4000)
+        datatable_output = dbc.Alert("No features extracted or data is empty.", color="info", style={'marginTop': '20px'})
 
-    return features_df.to_dict('records'), datatable_output
+    # Success notification
+    notification = dbc.Alert("Feature extraction complete!", color="success", duration=4000)
+
+    return features_df.to_dict('records'), datatable_output, notification
 
 # Callback to update feature dropdowns based on stored data
 @app.callback(
