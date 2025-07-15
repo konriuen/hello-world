@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import dash_bootstrap_components as dbc
 from feature_extractor import extract_features as calculate_waveform_features, numerize_result
 import ml_processor
+import webbrowser
 
 # Generate or load data
 print("Generating initial sensor data, please wait...")
@@ -96,11 +97,11 @@ app.layout = dbc.Container([
                 dbc.Col([
                     dbc.Button('Extract Features', id='extract-features-button', n_clicks=0, className="mt-4", color="primary")
                 ], md=4, className="d-flex align-items-end"),
-            ], className="mb-4"),
+            ], className="mb-2"),
+            dbc.Row(dbc.Col(html.Div(id='feature-extraction-notification'), width=12, className="mb-4")), # Notification area moved here
         ]),
 
         dbc.Tab(label="Feature Analysis", children=[
-            dbc.Row(dbc.Col(html.Div(id='feature-extraction-notification'), width=12, className="mt-3")), # Notification area
             dbc.Row(dbc.Col(
                 dcc.Loading(
                     id="loading-feature-table",
@@ -359,6 +360,12 @@ def update_feature_graph_and_stats(stored_feature_data, x_feature, y_feature, gr
                         labels={col: col.replace("_", " ").title() for col in dimensions},
                         title="Parallel Coordinates Plot of Features (OK: Green, NG: Red)"
                     )
+                     # Adjust layout for better label visibility
+                     # After further review, tickangle is not supported for parallel coordinates dimensions.
+                     # The best approach is to increase margins and rely on hover labels.
+                     fig.update_layout(
+                         margin=dict(l=80, r=80, t=100, b=80), # Increase margins
+                     )
             else:
                 fig.update_layout(title_text="Not enough numeric data for Parallel Coordinates plot.")
                 stats_output_content = [dbc.Alert("Not enough data for Parallel Coordinates.", color="warning", dismissable=True, duration=4000)]
@@ -671,4 +678,9 @@ def update_graph(selected_location, selected_sensor_ids):
     return fig
 
 if __name__ == '__main__':
+    # Define the URL
+    URL = "http://127.0.0.1:8050"
+    # Open the URL in a new browser tab
+    webbrowser.open_new(URL)
+    # Run the app
     app.run(debug=True, host='127.0.0.1', port=8050)
