@@ -10,10 +10,39 @@ import dash_bootstrap_components as dbc
 from feature_extractor import extract_features as calculate_waveform_features, numerize_result
 import ml_processor
 import webbrowser
+import json
+import os
+
+# --- Configuration Handling ---
+CONFIG_FILE = "config.json"
+
+def load_config():
+    """Loads configuration from config.json or returns default."""
+    default_config = {
+      "waveform": { "min_count": 10000, "max_count": 40000, "interval": 1 },
+      "columns": { "time": "DATE_AND_TIME", "assy_number_col_name": "AssyNo", "ct": "CoreAssy1[10]", "plc_signal": "CoreAssy1[42]" },
+      "ngdata_columns": { "ng_data_qr_col_name": "qrcode", "ng_type_col_name": "furyo", "ng_type_name": "77.チューブ根付け漏れ　カシメ側" },
+      "sensor_name": [ "SNS1[0]", "SNS1[1]", "SNS1[2]", "SNS2[0]", "SNS2[1]", "SNS2[2]", "SNS3[0]", "SNS3[1]", "SNS3[2]", "SNS3[3]", "SNS4[0]", "SNS4[1]", "SNS4[2]", "SNS4[3]", "SNS4[4]", "SNS4[5]", "SNS4[6]", "SNS4[7]", "Hiwin1", "Hiwin2", "Hiwin3", "Hiwin4" ],
+      "paths": { "data_folder": "./data/", "ng_data_folder": "./ng_data/" }
+    }
+    if os.path.exists(CONFIG_FILE):
+        print(f"Loading configuration from {CONFIG_FILE}...")
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                print(f"Warning: Could not decode {CONFIG_FILE}. Using default config.")
+                return default_config
+    else:
+        print("No config.json found. Using default configuration.")
+        return default_config
+
+# Load initial config
+config_data = load_config()
 
 # Generate or load data
 print("Generating initial sensor data, please wait...")
-sensor_df = generate_sensor_data()
+sensor_df = generate_sensor_data() # This might use config_data in a future implementation
 print("Sensor data generation complete. Application is ready.")
 
 # Initialize the Dash app with a DBC theme
@@ -21,7 +50,86 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # App layout using dbc.Container for better spacing and responsiveness
 app.layout = dbc.Container([
-    dbc.Row(dbc.Col(html.H1("Sensor Waveform Analysis Dashboard", className="text-center my-4"))),
+    dbc.Row([
+        dbc.Col(html.H1("Sensor Waveform Analysis Dashboard", className="text-center my-4"), width=11),
+        dbc.Col(dbc.Button("Settings", id="open-settings-modal-button", className="mt-4"), width=1, style={'textAlign': 'right'})
+    ]),
+    
+    # Settings Modal
+    dbc.Modal([
+        dbc.ModalHeader("Application Settings"),
+        dbc.ModalBody(
+            dbc.Form([
+                # Waveform Settings
+                html.H5("Waveform"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("Min Count"), width=3),
+                    dbc.Col(dbc.Input(type="number", id="config-waveform-min_count"), width=9)
+                ], className="mb-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("Max Count"), width=3),
+                    dbc.Col(dbc.Input(type="number", id="config-waveform-max_count"), width=9)
+                ], className="mb-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("Interval"), width=3),
+                    dbc.Col(dbc.Input(type="number", id="config-waveform-interval"), width=9)
+                ], className="mb-3"),
+
+                # Column Names
+                html.H5("Column Names"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("Time Column"), width=4),
+                    dbc.Col(dbc.Input(type="text", id="config-columns-time"), width=8)
+                ], className="mb-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("Assy Number Column"), width=4),
+                    dbc.Col(dbc.Input(type="text", id="config-columns-assy_number"), width=8)
+                ], className="mb-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("CT Column"), width=4),
+                    dbc.Col(dbc.Input(type="text", id="config-columns-ct"), width=8)
+                ], className="mb-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("PLC Signal Column"), width=4),
+                    dbc.Col(dbc.Input(type="text", id="config-columns-plc_signal"), width=8)
+                ], className="mb-3"),
+
+                # NG Data Columns
+                html.H5("NG Data Columns"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("QR Code Column"), width=4),
+                    dbc.Col(dbc.Input(type="text", id="config-ng-qr"), width=8)
+                ], className="mb-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("NG Type Column"), width=4),
+                    dbc.Col(dbc.Input(type="text", id="config-ng-type_col"), width=8)
+                ], className="mb-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("NG Type Name"), width=4),
+                    dbc.Col(dbc.Input(type="text", id="config-ng-type_name"), width=8)
+                ], className="mb-3"),
+
+                # Sensor Names
+                html.H5("Sensor Names"),
+                dbc.Textarea(id="config-sensor_names", placeholder="Enter sensor names, one per line", style={"height": "150px"}, className="mb-3"),
+
+                # Paths
+                html.H5("Paths"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("Data Folder"), width=3),
+                    dbc.Col(dbc.Input(type="text", id="config-paths-data"), width=9)
+                ], className="mb-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Label("NG Data Folder"), width=3),
+                    dbc.Col(dbc.Input(type="text", id="config-paths-ng_data"), width=9)
+                ], className="mb-2"),
+            ])
+        ),
+        dbc.ModalFooter([
+            dbc.Button("Save", id="save-settings-button", color="primary"),
+            dbc.Button("Cancel", id="cancel-settings-button", color="secondary")
+        ])
+    ], id="settings-modal", is_open=False, size="lg"), # Large modal
 
     dbc.Tabs([
         dbc.Tab(label="Waveform Explorer & Feature Extraction", children=[
@@ -176,9 +284,126 @@ app.layout = dbc.Container([
     ]),
 
     dcc.Download(id="download-dataframe-csv"),
-    dcc.Store(id='extracted-features-store')
+    dcc.Store(id='extracted-features-store'),
+    dcc.Store(id='config-store', data=config_data) # Add config store to layout
 ], fluid=True)
 
+
+# --- Settings Modal Callbacks ---
+
+@app.callback(
+    Output('config-store', 'data'),
+    Output("settings-modal", "is_open", allow_duplicate=True), # Use allow_duplicate
+    Output("feature-extraction-notification", "children", allow_duplicate=True), # For save notification
+    [Input("save-settings-button", "n_clicks")],
+    [State("config-waveform-min_count", "value"),
+     State("config-waveform-max_count", "value"),
+     State("config-waveform-interval", "value"),
+     State("config-columns-time", "value"),
+     State("config-columns-assy_number", "value"),
+     State("config-columns-ct", "value"),
+     State("config-columns-plc_signal", "value"),
+     State("config-ng-qr", "value"),
+     State("config-ng-type_col", "value"),
+     State("config-ng-type_name", "value"),
+     State("config-sensor_names", "value"),
+     State("config-paths-data", "value"),
+     State("config-paths-ng_data", "value"),
+     State("config-store", "data")],
+    prevent_initial_call=True
+)
+def save_settings(n_clicks, min_count, max_count, interval, time_col, assy_col, ct_col, plc_col,
+                  ng_qr, ng_type_col, ng_type_name, sensor_names_str, data_path, ng_data_path,
+                  current_config):
+    if n_clicks == 0:
+        raise dash.exceptions.PreventUpdate
+
+    # Reconstruct the config dictionary from form values
+    new_config = {
+        "waveform": {
+            "min_count": min_count,
+            "max_count": max_count,
+            "interval": interval
+        },
+        "columns": {
+            "time": time_col,
+            "assy_number_col_name": assy_col,
+            "ct": ct_col,
+            "plc_signal": plc_col
+        },
+        "ngdata_columns": {
+            "ng_data_qr_col_name": ng_qr,
+            "ng_type_col_name": ng_type_col,
+            "ng_type_name": ng_type_name
+        },
+        # Convert sensor names from string (one per line) to list
+        "sensor_name": [name.strip() for name in sensor_names_str.split('\n') if name.strip()],
+        "paths": {
+            "data_folder": data_path,
+            "ng_data_folder": ng_data_path
+        }
+    }
+
+    # Save to config.json file
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(new_config, f, indent=2, ensure_ascii=False)
+        notification = dbc.Alert("Settings saved successfully!", color="success", duration=3000)
+    except Exception as e:
+        print(f"Error saving config file: {e}")
+        notification = dbc.Alert(f"Error saving settings: {e}", color="danger", duration=5000)
+
+    # Return updated config to store, close modal, and show notification
+    return new_config, False, notification
+
+
+@app.callback(
+    Output("settings-modal", "is_open", allow_duplicate=True),
+    [Input("open-settings-modal-button", "n_clicks"), Input("cancel-settings-button", "n_clicks")],
+    [State("settings-modal", "is_open")],
+    prevent_initial_call=True
+)
+def toggle_modal(n1, n2, is_open):
+    if n1 or n2:
+        return not is_open
+    return is_open
+
+@app.callback(
+    [Output("config-waveform-min_count", "value"),
+     Output("config-waveform-max_count", "value"),
+     Output("config-waveform-interval", "value"),
+     Output("config-columns-time", "value"),
+     Output("config-columns-assy_number", "value"),
+     Output("config-columns-ct", "value"),
+     Output("config-columns-plc_signal", "value"),
+     Output("config-ng-qr", "value"),
+     Output("config-ng-type_col", "value"),
+     Output("config-ng-type_name", "value"),
+     Output("config-sensor_names", "value"),
+     Output("config-paths-data", "value"),
+     Output("config-paths-ng_data", "value")],
+    [Input("settings-modal", "is_open")],
+    [State("config-store", "data")]
+)
+def populate_settings_modal(is_open, stored_config):
+    if not is_open or not stored_config:
+        return (dash.no_update,) * 13 # Return no_update for all 13 outputs
+
+    return [
+        stored_config.get("waveform", {}).get("min_count"),
+        stored_config.get("waveform", {}).get("max_count"),
+        stored_config.get("waveform", {}).get("interval"),
+        stored_config.get("columns", {}).get("time"),
+        stored_config.get("columns", {}).get("assy_number_col_name"),
+        stored_config.get("columns", {}).get("ct"),
+        stored_config.get("columns", {}).get("plc_signal"),
+        stored_config.get("ngdata_columns", {}).get("ng_data_qr_col_name"),
+        stored_config.get("ngdata_columns", {}).get("ng_type_col_name"),
+        stored_config.get("ngdata_columns", {}).get("ng_type_name"),
+        "\n".join(stored_config.get("sensor_name", [])), # Join list to string for textarea
+        stored_config.get("paths", {}).get("data_folder"),
+        stored_config.get("paths", {}).get("ng_data_folder"),
+    ]
 
 # Callback to show/hide N Segments input based on "Segmented Features" selection
 @app.callback(
@@ -190,7 +415,7 @@ def toggle_n_segments_input(selected_features):
     # We only toggle 'display'
     base_style = {'width': '30%', 'display': 'inline-block', 'verticalAlign': 'top', 'marginLeft': '20px'} # Default style from previous version for consistency
     if selected_features and 'segmented_features' in selected_features:
-        base_style['display'] = 'block'
+        base_style['display'] = 'block' 
     else:
         base_style['display'] = 'none'
     return base_style
@@ -252,13 +477,13 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
     for s_id in wave_df_for_extraction['sensor_id'].unique():
         sensor_waveform_data = wave_df_for_extraction[wave_df_for_extraction['sensor_id'] == s_id]['value']
         if sensor_waveform_data.empty: continue
-
+        
         features = calculate_waveform_features(
             series=sensor_waveform_data,
             selected_feature_names=selected_features_names,
             n_segments=n_segments # Pass N regardless, function will ignore if not needed
         )
-
+        
         features['sensor_id'] = s_id
         features['location_id'] = wave_df_for_extraction[wave_df_for_extraction['sensor_id'] == s_id]['location_id'].iloc[0]
         features['result'] = wave_df_for_extraction[wave_df_for_extraction['sensor_id'] == s_id]['result'].iloc[0]
@@ -291,7 +516,7 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
 
     # Success notification
     notification = dbc.Alert("Feature extraction complete!", color="success", duration=4000)
-
+    
     return features_df.to_dict('records'), datatable_output, notification
 
 # Callback to update feature dropdowns based on stored data
@@ -528,7 +753,7 @@ def run_ml_analysis_and_display(n_clicks, stored_feature_data, selected_models):
         }
         # metrics_df = pd.DataFrame([metrics_data]).T.reset_index() # This creates a DataFrame with one row
         metrics_df = pd.DataFrame(list(metrics_data.items()), columns=["Metric", "Value"]) # Correct way for two columns
-
+        
         metrics_table = dbc.Table.from_dataframe(metrics_df, striped=True, bordered=True, hover=True, className="mt-3")
         results_children.append(html.H5("Evaluation Metrics:", className="mt-3"))
         results_children.append(metrics_table)
@@ -647,7 +872,7 @@ def update_graph(selected_location, selected_sensor_ids):
             title_parts.append(f"{sid_in_title} ({result})")
 
     location_str = selected_location if selected_location != 'all' else "All Locations"
-
+    
     # Refine sensors_str based on actual_sensor_ids_to_filter and selected_sensor_ids
     if 'all' in selected_sensor_ids and not actual_sensor_ids_to_filter and selected_location == 'all':
         sensors_str = "All Sensors (All Locations)"
@@ -657,7 +882,7 @@ def update_graph(selected_location, selected_sensor_ids):
         sensors_str = "None Selected / No Data"
     else:
         sensors_str = ", ".join(title_parts)
-
+        
     title = f"Waveforms for Location: {location_str} - Sensors: {sensors_str}"
 
 
@@ -680,7 +905,8 @@ def update_graph(selected_location, selected_sensor_ids):
 if __name__ == '__main__':
     # Define the URL
     URL = "http://127.0.0.1:8050"
-    # Open the URL in a new browser tab
-    webbrowser.open_new(URL)
+    # Open the URL in a new browser tab only in the main process
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        webbrowser.open_new(URL)
     # Run the app
     app.run(debug=True, host='127.0.0.1', port=8050)
