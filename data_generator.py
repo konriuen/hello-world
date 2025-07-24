@@ -1,69 +1,84 @@
 import numpy as np
 import pandas as pd
-
-NUM_LOCATIONS = 3
-SENSORS_PER_LOCATION = 10
-NG_SENSORS_PER_LOCATION = 5
-OK_SENSORS_PER_LOCATION = SENSORS_PER_LOCATION - NG_SENSORS_PER_LOCATION
-NUM_DATAPOINTS = 1000
-LOCATIONS = ['A', 'B', 'C']
+import datetime
 
 def generate_sensor_data():
     """
-    Generates sample sensor data with location_id.
-
-    Returns:
-        pandas.DataFrame: DataFrame with columns 'location_id', 'sensor_id',
-                          'timestamp', 'value', and 'result'.
+    Generates a larger sample of sensor data (approx. 30 unique AssyNo).
+    Returns a DataFrame with original column names.
     """
     data = []
-    sensor_counter = 1
-    for loc_idx, location_id in enumerate(LOCATIONS):
-        for i in range(SENSORS_PER_LOCATION):
-            # Unique sensor ID across all locations
-            sensor_id = f"sensor_{sensor_counter:02d}"
-            sensor_counter += 1
+    base_time = datetime.datetime(2025, 5, 16, 13, 30, 38)
+    num_samples = 30
 
-            timestamps = np.arange(NUM_DATAPOINTS)
-            # Generate some waveform data (e.g., sine wave with noise)
-            # Vary frequency per sensor based on overall sensor index
-            base_wave = np.sin(timestamps / (50 + (loc_idx * SENSORS_PER_LOCATION + i) * 2))
-            noise = np.random.normal(0, 0.2, NUM_DATAPOINTS)
-            values = base_wave + noise
+    # Generate lists of data for 30 samples
+    assy_nos = [f"JP4466104371250516{i:04d}" for i in range(num_samples)]
 
-            # Assign results (OK/NG) per location
-            if i < NG_SENSORS_PER_LOCATION:
-                result = "NG"
-            else:
-                result = "OK"
+    # Create more diverse hinbans
+    hinban_bases = ["4466104371", "4466104372", "4466105510", "4466105511"]
+    hinbans = [np.random.choice(hinban_bases) for _ in range(num_samples)]
 
-            for t, v in zip(timestamps, values):
-                data.append([location_id, sensor_id, t, v, result])
+    # Create more diverse ng_types
+    ng_type_options = ["チューブ漏れ", "カシメ不良", "異音", "センサーずれ", "OK"] # Add "OK" for non-ng items
+    # Skew the distribution: more OK, some common failures, few rare ones
+    ng_type_probabilities = [0.25, 0.25, 0.1, 0.1, 0.3]
+    ng_types = np.random.choice(ng_type_options, num_samples, p=ng_type_probabilities)
 
-    df = pd.DataFrame(data, columns=['location_id', 'sensor_id', 'timestamp', 'value', 'result'])
+    # Create results based on ng_type
+    results = ["OK" if ng == "OK" else "NG" for ng in ng_types]
+
+    # Create diverse sensor types
+    sensor_type_options = [f"SNS{i}[{j}]" for i in range(1, 5) for j in range(4)]
+    sensor_types = [np.random.choice(sensor_type_options) for _ in range(num_samples)]
+
+
+    for i in range(num_samples):
+        num_datapoints = np.random.randint(200, 500)
+        timestamps = [base_time + datetime.timedelta(seconds=j) for j in range(num_datapoints)]
+
+        # Generate waveform data - make NG waveforms slightly different
+        base_amplitude = 50
+        noise_level = 5
+        if results[i] == "NG":
+            # Introduce some anomaly for NG parts
+            base_amplitude = np.random.uniform(55, 70)
+            noise_level = np.random.uniform(7, 12)
+
+        base_wave = np.sin(np.linspace(0, np.random.choice([5, 10, 15]) * np.pi, num_datapoints)) * base_amplitude + 80
+        noise = np.random.normal(0, noise_level, num_datapoints)
+        sensor_values = base_wave + noise
+
+        # Add a spike anomaly for a specific NG type
+        if ng_types[i] == "カシメ不良":
+             spike_start = num_datapoints // 2
+             sensor_values[spike_start : spike_start + 5] += 30
+
+        for j in range(num_datapoints):
+            data.append([
+                timestamps[j],
+                assy_nos[i],
+                0, 10,  # CoreAssy1[10], CoreAssy1[42]
+                hinbans[i],
+                j + 1,  # No
+                results[i],
+                sensor_types[i],
+                sensor_values[j],
+                ng_types[i]
+            ])
+
+    df = pd.DataFrame(data, columns=[
+        'DATE_AND_TIME', 'AssyNo', 'CoreAssy1[10]', 'CoreAssy1[42]',
+        'hinban', 'No', 'result', 'Sensor_Type', 'Sensor_Value', 'ng_type'
+    ])
     return df
 
 if __name__ == '__main__':
     sensor_df = generate_sensor_data()
     print(f"Generated DataFrame shape: {sensor_df.shape}")
+    print(f"Number of unique AssyNo: {sensor_df['AssyNo'].nunique()}")
+    print("\nColumns:", sensor_df.columns)
+    print("\nResult distribution:\n", sensor_df.groupby('AssyNo')['result'].first().value_counts())
+    print("\nNG Type distribution:\n", sensor_df.groupby('AssyNo')['ng_type'].first().value_counts())
+    print("\nHinban distribution:\n", sensor_df.groupby('AssyNo')['hinban'].first().value_counts())
+    print("\nSample Data Head:")
     print(sensor_df.head())
-
-    print("\nResult distribution per location:")
-    print(sensor_df.groupby(['location_id', 'sensor_id'])['result'].first().groupby('location_id').value_counts())
-
-    print("\nOverall result distribution for sensors:")
-    print(sensor_df.groupby('sensor_id')['result'].first().value_counts())
-
-    # Verify counts
-    total_sensors = len(LOCATIONS) * SENSORS_PER_LOCATION
-    print(f"\nTotal sensors generated: {sensor_df['sensor_id'].nunique()} (Expected: {total_sensors})")
-
-    for loc in LOCATIONS:
-        loc_df = sensor_df[sensor_df['location_id'] == loc]
-        ng_count = loc_df.groupby('sensor_id')['result'].first().value_counts().get('NG', 0)
-        ok_count = loc_df.groupby('sensor_id')['result'].first().value_counts().get('OK', 0)
-        print(f"Location {loc}: NG sensors = {ng_count} (Expected: {NG_SENSORS_PER_LOCATION}), OK sensors = {ok_count} (Expected: {OK_SENSORS_PER_LOCATION})")
-
-    # Save to a CSV for inspection if needed (optional)
-    # sensor_df.to_csv("sample_sensor_data_with_location.csv", index=False)
-    # print("\nSample data saved to sample_sensor_data_with_location.csv")

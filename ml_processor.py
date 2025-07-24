@@ -25,7 +25,7 @@ def preprocess_data(df, target_column='result_numeric'):
         le = LabelEncoder()
         df[target_column] = le.fit_transform(df[target_column])
 
-    X = df.drop(columns=[target_column, 'result', 'sensor_id', 'location_id'], errors='ignore')
+    X = df.drop(columns=[target_column, 'result', 'sensor_id', 'location_id', 'hinban'], errors='ignore')
     y = df[target_column]
 
     if X.empty:

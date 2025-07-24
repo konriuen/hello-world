@@ -133,27 +133,68 @@ app.layout = dbc.Container([
 
     dbc.Tabs([
         dbc.Tab(label="Waveform Explorer & Feature Extraction", children=[
-            dbc.Row([ # Row for location and sensor dropdowns
+            dbc.Row([
                 dbc.Col([
-                    html.Label("Select Location ID:"),
+                    html.Label("Select ng_type:"),
                     dcc.Dropdown(
-                        id='location-dropdown',
-                        options=[{'label': 'All Locations', 'value': 'all'}] + [{'label': loc, 'value': loc} for loc in sensor_df['location_id'].unique()],
+                        id='ng-type-dropdown',
+                        options=[{'label': 'All', 'value': 'all'}] + [{'label': ng_type, 'value': ng_type} for ng_type in sensor_df['ng_type'].unique()],
+                        value=['all'],
+                        multi=True
+                    ),
+                ], md=2),
+                dbc.Col([
+                    html.Label("Select AssyNo:"),
+                    dcc.Dropdown(
+                        id='assy-no-dropdown',
+                        options=[{'label': 'All', 'value': 'all'}],
+                        value=['all'],
+                        multi=True
+                    ),
+                ], md=3),
+                dbc.Col([
+                    html.Label("Select hinban:"),
+                    dcc.Dropdown(
+                        id='hinban-dropdown',
+                        options=[{'label': 'All', 'value': 'all'}],
                         value='all',
                         clearable=False
                     ),
-                ], md=6),
-
+                ], md=2),
                 dbc.Col([
-                    html.Label("Select Sensor ID(s):"),
+                    html.Label("Select Sensor_Type:"),
                     dcc.Dropdown(
-                        id='sensor-dropdown',
-                        options=[],
-                        value=[],
-                        multi=True
+                        id='sensor-type-dropdown',
+                        options=[{'label': 'All', 'value': 'all'}],
+                        value='all',
+                        clearable=False
                     ),
-                ], md=6),
+                ], md=3),
+                dbc.Col([
+                    html.Label("Select result:"),
+                    dcc.Dropdown(
+                        id='result-dropdown',
+                        options=[{'label': 'All', 'value': 'all'}] + [{'label': res, 'value': res} for res in sensor_df['result'].unique()],
+                        value='all',
+                        clearable=False
+                    ),
+                ], md=2),
             ], className="mt-3"),
+
+            dbc.Row([
+                dbc.Col(dbc.Button("Reset Filters", id="reset-filters-button", color="secondary", className="me-1"), width="auto"),
+            ], className="mt-2 mb-2"),
+
+            dbc.Row([
+                dbc.Col([
+                    html.Label("Line Width:"),
+                    dcc.Slider(id='line-width-slider', min=0.5, max=5, step=0.5, value=1, marks={i: str(i) for i in range(1, 6)}),
+                ], width=6),
+                dbc.Col([
+                    html.Label("Opacity:"),
+                    dcc.Slider(id='opacity-slider', min=0.1, max=1, step=0.1, value=1.0, marks={i/10: str(i/10) for i in range(1, 11, 2)}),
+                ], width=6),
+            ], className="mt-4"),
 
             dbc.Row(dbc.Col(dcc.Graph(id='waveform-graph'), className="mt-3")),
             dbc.Row(dbc.Col(html.Hr(), className="my-3")),
@@ -426,22 +467,46 @@ def toggle_n_segments_input(selected_features):
     Output('feature-table-output', 'children'),
     Output('feature-extraction-notification', 'children'), # New output for notifications
     [Input('extract-features-button', 'n_clicks')],
-    [State('location-dropdown', 'value'),
-     State('sensor-dropdown', 'value'),
+    [State('ng-type-dropdown', 'value'),
+     State('assy-no-dropdown', 'value'),
+     State('hinban-dropdown', 'value'),
+     State('sensor-type-dropdown', 'value'),
+     State('result-dropdown', 'value'),
      State('feature-checklist', 'value'),
      State('n-segments-input', 'value'),
      State('extracted-features-store', 'data')]
 )
-def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
+def handle_feature_extraction(n_clicks, selected_ng_type, selected_assy_nos,
+                              selected_hinban, selected_sensor_type, selected_result,
                               selected_features_names, n_segments, existing_store_data):
     if n_clicks == 0:
         return existing_store_data, html.P("Feature data will appear here after extraction. Select options and click 'Extract Features'."), "" # No notification initially
 
-    # Handle validation errors by returning an alert to the notification area
-    if not selected_location:
-        return existing_store_data, dash.no_update, dbc.Alert("Please select a location.", color="danger", dismissable=True)
-    if not selected_sensor_ids:
-        return existing_store_data, dash.no_update, dbc.Alert("Please select at least one sensor.", color="danger", dismissable=True)
+    # --- Create a compatible DataFrame for feature extraction ---
+    # Filter data based on the current selections in the main graph
+    df_for_extraction = sensor_df.copy()
+
+    if 'all' not in selected_ng_type and selected_ng_type:
+        df_for_extraction = df_for_extraction[df_for_extraction['ng_type'].isin(selected_ng_type)]
+    if selected_hinban != 'all':
+        df_for_extraction = df_for_extraction[df_for_extraction['hinban'] == selected_hinban]
+    if selected_result != 'all':
+        df_for_extraction = df_for_extraction[df_for_extraction['result'] == selected_result]
+    if selected_sensor_type != 'all':
+        df_for_extraction = df_for_extraction[df_for_extraction['Sensor_Type'] == selected_sensor_type]
+    if 'all' not in selected_assy_nos and selected_assy_nos:
+        df_for_extraction = df_for_extraction[df_for_extraction['AssyNo'].isin(selected_assy_nos)]
+
+    # Rename columns for compatibility with the feature extraction logic
+    df_for_extraction = df_for_extraction.rename(columns={
+        "ng_type": "location_id",
+        "AssyNo": "sensor_id",
+        "Sensor_Value": "value"
+    })
+
+    # Handle validation errors
+    if df_for_extraction.empty:
+         return existing_store_data, dash.no_update, dbc.Alert("No data matching current filters to extract features from.", color="warning", dismissable=True)
     if not selected_features_names:
         return existing_store_data, dash.no_update, dbc.Alert("Please select at least one feature to extract.", color="danger", dismissable=True)
 
@@ -452,22 +517,13 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
 
     # Determine sensors to process
     sensors_to_process = []
-    if 'all' in selected_sensor_ids:
-        if selected_location == 'all':
-            sensors_to_process = list(sensor_df['sensor_id'].unique())
-        else:
-            sensors_to_process = list(sensor_df[sensor_df['location_id'] == selected_location]['sensor_id'].unique())
+    if 'all' in selected_assy_nos:
+        sensors_to_process = list(df_for_extraction['sensor_id'].unique())
     else:
-        sensors_to_process = [sid for sid in selected_sensor_ids if sid != 'all']
+        sensors_to_process = [sid for sid in selected_assy_nos if sid != 'all']
 
-    # Filter waveform data
-    if selected_location == 'all':
-        wave_df_for_extraction = sensor_df[sensor_df['sensor_id'].isin(sensors_to_process)]
-    else:
-        wave_df_for_extraction = sensor_df[
-            (sensor_df['location_id'] == selected_location) &
-            (sensor_df['sensor_id'].isin(sensors_to_process))
-        ]
+    # Filter waveform data for feature extraction
+    wave_df_for_extraction = df_for_extraction[df_for_extraction['sensor_id'].isin(sensors_to_process)]
 
     if wave_df_for_extraction.empty:
         return [], dash.no_update, dbc.Alert("No waveform data found for selected sensors and location.", color="warning", dismissable=True)
@@ -484,9 +540,13 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
             n_segments=n_segments # Pass N regardless, function will ignore if not needed
         )
         
+        # Add identifier columns back for context
         features['sensor_id'] = s_id
+        # Get the original 'ng_type' for the 'location_id' field
         features['location_id'] = wave_df_for_extraction[wave_df_for_extraction['sensor_id'] == s_id]['location_id'].iloc[0]
         features['result'] = wave_df_for_extraction[wave_df_for_extraction['sensor_id'] == s_id]['result'].iloc[0]
+        # Add other relevant columns if needed, e.g., hinban
+        features['hinban'] = sensor_df[sensor_df['AssyNo'] == s_id]['hinban'].iloc[0]
         all_extracted_features.append(features)
 
     if not all_extracted_features:
@@ -495,7 +555,8 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
     features_df = pd.DataFrame(all_extracted_features)
     if not features_df.empty:
         features_df['result_numeric'] = numerize_result(features_df['result'])
-        id_cols = ['location_id', 'sensor_id', 'result', 'result_numeric']
+        # Define order of columns for the output table
+        id_cols = ['location_id', 'sensor_id', 'hinban', 'result', 'result_numeric']
         present_id_cols = [col for col in id_cols if col in features_df.columns]
         feature_col_names = sorted([col for col in features_df.columns if col not in present_id_cols])
         ordered_columns = present_id_cols + feature_col_names
@@ -517,6 +578,7 @@ def handle_feature_extraction(n_clicks, selected_location, selected_sensor_ids,
     # Success notification
     notification = dbc.Alert("Feature extraction complete!", color="success", duration=4000)
     
+    # Store the DataFrame with compatible column names ('location_id', 'sensor_id')
     return features_df.to_dict('records'), datatable_output, notification
 
 # Callback to update feature dropdowns based on stored data
@@ -532,7 +594,8 @@ def update_feature_plot_dropdowns(stored_feature_data):
         return [], [], None, None
 
     df = pd.DataFrame(stored_feature_data)
-    potential_features = [col for col in df.columns if col not in ['sensor_id', 'location_id', 'result']]
+    # Exclude all identifier columns from feature selection
+    potential_features = [col for col in df.columns if col not in ['sensor_id', 'location_id', 'result', 'hinban']]
     options = [{'label': col, 'value': col} for col in potential_features]
 
     default_x = options[0]['value'] if options else None
@@ -571,7 +634,8 @@ def update_feature_graph_and_stats(stored_feature_data, x_feature, y_feature, gr
             numeric_cols_for_parallel = df.select_dtypes(include=np.number).columns.tolist()
 
             if 'result_numeric' in numeric_cols_for_parallel and len(numeric_cols_for_parallel) > 1:
-                dimensions = [col for col in numeric_cols_for_parallel if col not in ['sensor_id', 'location_id']]
+                # Exclude all identifier columns
+                dimensions = [col for col in numeric_cols_for_parallel if col not in ['sensor_id', 'location_id', 'hinban']]
                 if not dimensions:
                     fig.update_layout(title_text="No numeric dimensions found for Parallel Coordinates plot.")
                     return fig, dbc.Alert("No numeric dimensions for Parallel Coordinates.", color="warning", dismissable=True, duration=4000)
@@ -585,9 +649,6 @@ def update_feature_graph_and_stats(stored_feature_data, x_feature, y_feature, gr
                         labels={col: col.replace("_", " ").title() for col in dimensions},
                         title="Parallel Coordinates Plot of Features (OK: Green, NG: Red)"
                     )
-                     # Adjust layout for better label visibility
-                     # After further review, tickangle is not supported for parallel coordinates dimensions.
-                     # The best approach is to increase margins and rely on hover labels.
                      fig.update_layout(
                          margin=dict(l=80, r=80, t=100, b=80), # Increase margins
                      )
@@ -606,7 +667,7 @@ def update_feature_graph_and_stats(stored_feature_data, x_feature, y_feature, gr
             fig = px.scatter(df, x=x_feature, y=y_feature, color='result',
                              title=f"Scatter Plot: {x_feature} vs {y_feature}",
                              color_discrete_map={"OK": "green", "NG": "red"},
-                             hover_data=['sensor_id', 'location_id'])
+                             hover_data=['sensor_id', 'location_id', 'hinban'])
 
             stats_output_content.append(html.H5(f"Descriptive Statistics for '{x_feature}':"))
             ok_data = df[(df['result'] == 'OK') & pd.notna(df[x_feature])][x_feature]
@@ -789,118 +850,143 @@ def download_csv(n_clicks, stored_feature_data):
     if df.empty:
         return None
 
-    id_cols = ['location_id', 'sensor_id', 'result', 'result_numeric']
-    feature_cols = [col for col in df.columns if col not in id_cols]
-    final_cols = [col for col in id_cols if col in df.columns]
-    final_cols.extend(sorted(feature_cols))
+    # The feature store already has 'location_id' and 'sensor_id' from the extraction callback
+    id_cols = ['location_id', 'sensor_id', 'hinban', 'result', 'result_numeric']
+    present_id_cols = [col for col in id_cols if col in df.columns]
+    feature_cols = [col for col in df.columns if col not in present_id_cols]
+    final_cols = present_id_cols + sorted(feature_cols)
     df_to_download = df[final_cols]
 
     return dcc.send_data_frame(df_to_download.to_csv, "extracted_features.csv", index=False)
 
-# Callback to update sensor dropdown based on location
+# Callback for interdependent dropdowns
 @app.callback(
-    Output('sensor-dropdown', 'options'),
-    Output('sensor-dropdown', 'value'),
-    [Input('location-dropdown', 'value')]
+    [Output('ng-type-dropdown', 'options'),
+     Output('assy-no-dropdown', 'options'),
+     Output('hinban-dropdown', 'options'),
+     Output('sensor-type-dropdown', 'options'),
+     Output('result-dropdown', 'options')],
+    [Input('ng-type-dropdown', 'value'),
+     Input('assy-no-dropdown', 'value'),
+     Input('hinban-dropdown', 'value'),
+     Input('sensor-type-dropdown', 'value'),
+     Input('result-dropdown', 'value')]
 )
-def update_sensor_options(selected_location):
-    if not selected_location:
-        return [], []
+def update_interdependent_dropdowns(ng_type, assy_no, hinban, sensor_type, result):
 
-    options = []
-    if selected_location == 'all':
-        all_sensor_ids = sorted(sensor_df['sensor_id'].unique())
-        options = [{'label': 'All Sensors', 'value': 'all'}] + [{'label': sid, 'value': sid} for sid in all_sensor_ids]
-    else:
-        filtered_sensors = sorted(sensor_df[sensor_df['location_id'] == selected_location]['sensor_id'].unique())
-        options = [{'label': 'All Sensors', 'value': 'all'}] + [{'label': sid, 'value': sid} for sid in filtered_sensors]
-    return options, []
+    # Start with the full dataframe
+    dff = sensor_df.copy()
+
+    # Filter based on selections, but don't filter the dropdown that triggered the callback
+    ctx = dash.callback_context
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    if trigger_id != 'ng-type-dropdown' and 'all' not in ng_type and ng_type:
+        dff = dff[dff['ng_type'].isin(ng_type)]
+    if trigger_id != 'assy-no-dropdown' and 'all' not in assy_no and assy_no:
+        dff = dff[dff['AssyNo'].isin(assy_no)]
+    if trigger_id != 'hinban-dropdown' and hinban != 'all':
+        dff = dff[dff['hinban'] == hinban]
+    if trigger_id != 'sensor-type-dropdown' and sensor_type != 'all':
+        dff = dff[dff['Sensor_Type'] == sensor_type]
+    if trigger_id != 'result-dropdown' and result != 'all':
+        dff = dff[dff['result'] == result]
+
+    # Generate new options based on the filtered dataframe
+    ng_type_opts = [{'label': 'All', 'value': 'all'}] + [{'label': i, 'value': i} for i in dff['ng_type'].unique()]
+    assy_no_opts = [{'label': 'All', 'value': 'all'}] + [{'label': i, 'value': i} for i in dff['AssyNo'].unique()]
+    hinban_opts = [{'label': 'All', 'value': 'all'}] + [{'label': i, 'value': i} for i in dff['hinban'].unique()]
+    sensor_type_opts = [{'label': 'All', 'value': 'all'}] + [{'label': i, 'value': i} for i in dff['Sensor_Type'].unique()]
+    result_opts = [{'label': 'All', 'value': 'all'}] + [{'label': i, 'value': i} for i in dff['result'].unique()]
+
+    return ng_type_opts, assy_no_opts, hinban_opts, sensor_type_opts, result_opts
 
 # Callback to update graph
 @app.callback(
     Output('waveform-graph', 'figure'),
-    [Input('location-dropdown', 'value'),
-     Input('sensor-dropdown', 'value')]
+    [Input('ng-type-dropdown', 'value'),
+     Input('assy-no-dropdown', 'value'),
+     Input('hinban-dropdown', 'value'),
+     Input('result-dropdown', 'value'),
+     Input('sensor-type-dropdown', 'value'),
+     Input('line-width-slider', 'value'),
+     Input('opacity-slider', 'value')]
 )
-def update_graph(selected_location, selected_sensor_ids):
-    if not selected_location or not selected_sensor_ids:
-        fig = go.Figure()
-        fig.update_layout(
-            title_text="Please select a location and one or more sensors.",
-            xaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]),
-            yaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1])
-        )
-        return fig
+def update_graph(selected_ng_type, selected_assy_nos, selected_hinban, selected_result, selected_sensor_type, line_width, opacity):
 
-    query_parts = []
-    if selected_location != 'all':
-        query_parts.append(f"location_id == '{selected_location}'")
+    filtered_df = sensor_df.copy()
 
-    actual_sensor_ids_to_filter = []
-    if 'all' in selected_sensor_ids:
-        if selected_location != 'all': # 'all' sensors for a specific location
-             actual_sensor_ids_to_filter = list(sensor_df[sensor_df['location_id'] == selected_location]['sensor_id'].unique())
-        # If selected_location is 'all' and 'all' sensors, no sensor ID filter is added to query_parts here
-    else: # Specific sensors selected
-        actual_sensor_ids_to_filter = [sid for sid in selected_sensor_ids if sid != 'all']
+    # Apply filters based on dropdowns
+    if 'all' not in selected_ng_type and selected_ng_type:
+        filtered_df = filtered_df[filtered_df['ng_type'].isin(selected_ng_type)]
 
-    if actual_sensor_ids_to_filter: # Add sensor filter only if specific sensors are chosen or 'all' for specific location
-         query_parts.append(f"sensor_id in {actual_sensor_ids_to_filter}")
+    if selected_hinban != 'all':
+        filtered_df = filtered_df[filtered_df['hinban'] == selected_hinban]
 
-    if query_parts:
-        current_df = sensor_df.query(" and ".join(query_parts))
-    else: # This means 'All Locations' and 'All Sensors'
-        current_df = sensor_df.copy()
+    if selected_result != 'all':
+        filtered_df = filtered_df[filtered_df['result'] == selected_result]
 
-    if current_df.empty:
-        fig = go.Figure()
+    if selected_sensor_type != 'all':
+        filtered_df = filtered_df[filtered_df['Sensor_Type'] == selected_sensor_type]
+
+    # Handle 'all' case for multi-select AssyNo dropdown
+    if 'all' not in selected_assy_nos and selected_assy_nos:
+        filtered_df = filtered_df[filtered_df['AssyNo'].isin(selected_assy_nos)]
+
+    fig = go.Figure()
+
+    if filtered_df.empty:
         fig.update_layout(title_text="No data found for selected criteria.",
-                          xaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]),
-                          yaxis=dict(showgrid=False, zeroline=False, visible=True, range=[0,1]))
+                          xaxis=dict(showgrid=False, zeroline=False, visible=True),
+                          yaxis=dict(showgrid=False, zeroline=False, visible=True))
         return fig
 
-    # Title Generation
-    title_parts = []
-    sensors_in_title = current_df['sensor_id'].unique()
-    if len(sensors_in_title) > 3: # Shorten if many sensors
-        title_parts = [f"{sensors_in_title[0]} ({current_df[current_df['sensor_id'] == sensors_in_title[0]]['result'].iloc[0]})",
-                       f"{sensors_in_title[1]} ({current_df[current_df['sensor_id'] == sensors_in_title[1]]['result'].iloc[0]})",
-                       f"...and {len(sensors_in_title) - 2} more"]
-    else:
-        for sid_in_title in sensors_in_title: # Iterate over actual sensors in current_df for title
-            result = current_df[current_df['sensor_id'] == sid_in_title]['result'].iloc[0]
-            title_parts.append(f"{sid_in_title} ({result})")
+    color_map = {'OK': 'green', 'NG': 'red'}
 
-    location_str = selected_location if selected_location != 'all' else "All Locations"
-    
-    # Refine sensors_str based on actual_sensor_ids_to_filter and selected_sensor_ids
-    if 'all' in selected_sensor_ids and not actual_sensor_ids_to_filter and selected_location == 'all':
-        sensors_str = "All Sensors (All Locations)"
-    elif 'all' in selected_sensor_ids and actual_sensor_ids_to_filter: # 'all' sensors for a specific location
-        sensors_str = "All Sensors in selected location"
-    elif not title_parts:
-        sensors_str = "None Selected / No Data"
-    else:
-        sensors_str = ", ".join(title_parts)
-        
-    title = f"Waveforms for Location: {location_str} - Sensors: {sensors_str}"
+    for assy_no, group in filtered_df.groupby('AssyNo'):
+        result = group['result'].iloc[0]
+        color = color_map.get(result, 'grey')
+        custom_data = np.stack([
+            group['hinban'],
+            group['ng_type'],
+            group['Sensor_Type']
+        ], axis=-1)
+        fig.add_trace(go.Scatter(
+            x=group['No'],
+            y=group['Sensor_Value'],
+            mode='lines',
+            name=f"{assy_no} ({result})",
+            line=dict(width=line_width, color=color),
+            opacity=opacity,
+            customdata=custom_data,
+            hovertemplate="<b>AssyNo:</b> " + assy_no + "<br>" +
+                          "<b>No:</b> %{x}<br>" +
+                          "<b>Sensor_Value:</b> %{y}<br>" +
+                          "<b>Hinban:</b> %{customdata[0]}<br>" +
+                          "<b>NG Type:</b> %{customdata[1]}<br>" +
+                          "<b>Sensor Type:</b> %{customdata[2]}<extra></extra>"
+        ))
 
-
-    color_discrete_map = {}
-    for sensor_id_val in current_df['sensor_id'].unique():
-        result_status = current_df[current_df['sensor_id'] == sensor_id_val]['result'].iloc[0]
-        color_discrete_map[sensor_id_val] = "green" if result_status == "OK" else "red"
-
-    fig = px.line(current_df,
-                  x='timestamp',
-                  y='value',
-                  color='sensor_id',
-                  title=title,
-                  labels={'sensor_id': 'Sensor ID', 'value': 'Value', 'timestamp': 'Timestamp'},
-                  color_discrete_map=color_discrete_map)
-
-    fig.update_layout(legend_title_text='Sensor ID') # Changed from legend_title
+    fig.update_layout(
+        title="Waveform Viewer",
+        xaxis_title="No",
+        yaxis_title="Sensor Value",
+        legend_title="AssyNo (Result)"
+    )
     return fig
+
+# Callback to reset all filters
+@app.callback(
+    [Output('ng-type-dropdown', 'value'),
+     Output('assy-no-dropdown', 'value'),
+     Output('hinban-dropdown', 'value'),
+     Output('sensor-type-dropdown', 'value'),
+     Output('result-dropdown', 'value')],
+    [Input('reset-filters-button', 'n_clicks')],
+    prevent_initial_call=True
+)
+def reset_all_filters(n_clicks):
+    return ['all'], ['all'], 'all', 'all', 'all'
 
 if __name__ == '__main__':
     # Define the URL
@@ -910,3 +996,5 @@ if __name__ == '__main__':
         webbrowser.open_new(URL)
     # Run the app
     app.run(debug=True, host='127.0.0.1', port=8050)
+
+[end of app.py]
