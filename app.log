@@ -1,0 +1,4 @@
+  File "/app/app.py", line 1000
+    [end of app.py]
+     ^^^^^^
+SyntaxError: invalid syntax. Perhaps you forgot a comma?

@@ -139,8 +139,8 @@ app.layout = dbc.Container([
                     dcc.Dropdown(
                         id='ng-type-dropdown',
                         options=[{'label': 'All', 'value': 'all'}] + [{'label': ng_type, 'value': ng_type} for ng_type in sensor_df['ng_type'].unique()],
-                        value='all',
-                        clearable=False
+                        value=['all'],
+                        multi=True
                     ),
                 ], md=2),
                 dbc.Col([
@@ -180,6 +180,10 @@ app.layout = dbc.Container([
                     ),
                 ], md=2),
             ], className="mt-3"),
+
+            dbc.Row([
+                dbc.Col(dbc.Button("Reset Filters", id="reset-filters-button", color="secondary", className="me-1"), width="auto"),
+            ], className="mt-2 mb-2"),
 
             dbc.Row([
                 dbc.Col([
@@ -465,45 +469,44 @@ def toggle_n_segments_input(selected_features):
     [Input('extract-features-button', 'n_clicks')],
     [State('ng-type-dropdown', 'value'),
      State('assy-no-dropdown', 'value'),
+     State('hinban-dropdown', 'value'),
+     State('sensor-type-dropdown', 'value'),
+     State('result-dropdown', 'value'),
      State('feature-checklist', 'value'),
      State('n-segments-input', 'value'),
      State('extracted-features-store', 'data')]
 )
 def handle_feature_extraction(n_clicks, selected_ng_type, selected_assy_nos,
+                              selected_hinban, selected_sensor_type, selected_result,
                               selected_features_names, n_segments, existing_store_data):
     if n_clicks == 0:
         return existing_store_data, html.P("Feature data will appear here after extraction. Select options and click 'Extract Features'."), "" # No notification initially
 
     # --- Create a compatible DataFrame for feature extraction ---
-    # The feature extraction logic expects 'location_id', 'sensor_id', and 'value' columns.
-    # We create a temporary DataFrame with these columns from our main sensor_df.
-
-    # Start with a copy of the main DataFrame
+    # Filter data based on the current selections in the main graph
     df_for_extraction = sensor_df.copy()
 
-    # Filter based on the main waveform graph selections
-    if selected_ng_type != 'all':
-        df_for_extraction = df_for_extraction[df_for_extraction['ng_type'] == selected_ng_type]
-
-    # Handle 'all' case for multi-select AssyNo dropdown
+    if 'all' not in selected_ng_type and selected_ng_type:
+        df_for_extraction = df_for_extraction[df_for_extraction['ng_type'].isin(selected_ng_type)]
+    if selected_hinban != 'all':
+        df_for_extraction = df_for_extraction[df_for_extraction['hinban'] == selected_hinban]
+    if selected_result != 'all':
+        df_for_extraction = df_for_extraction[df_for_extraction['result'] == selected_result]
+    if selected_sensor_type != 'all':
+        df_for_extraction = df_for_extraction[df_for_extraction['Sensor_Type'] == selected_sensor_type]
     if 'all' not in selected_assy_nos and selected_assy_nos:
         df_for_extraction = df_for_extraction[df_for_extraction['AssyNo'].isin(selected_assy_nos)]
 
-    # Rename columns for compatibility
+    # Rename columns for compatibility with the feature extraction logic
     df_for_extraction = df_for_extraction.rename(columns={
         "ng_type": "location_id",
         "AssyNo": "sensor_id",
         "Sensor_Value": "value"
     })
 
-    selected_location = selected_ng_type
-    selected_sensor_ids = selected_assy_nos
-
-    # Handle validation errors by returning an alert to the notification area
-    if not selected_location:
-        return existing_store_data, dash.no_update, dbc.Alert("Please select an ng_type.", color="danger", dismissable=True)
-    if not selected_sensor_ids:
-        return existing_store_data, dash.no_update, dbc.Alert("Please select at least one AssyNo.", color="danger", dismissable=True)
+    # Handle validation errors
+    if df_for_extraction.empty:
+         return existing_store_data, dash.no_update, dbc.Alert("No data matching current filters to extract features from.", color="warning", dismissable=True)
     if not selected_features_names:
         return existing_store_data, dash.no_update, dbc.Alert("Please select at least one feature to extract.", color="danger", dismissable=True)
 
@@ -514,10 +517,10 @@ def handle_feature_extraction(n_clicks, selected_ng_type, selected_assy_nos,
 
     # Determine sensors to process
     sensors_to_process = []
-    if 'all' in selected_sensor_ids:
+    if 'all' in selected_assy_nos:
         sensors_to_process = list(df_for_extraction['sensor_id'].unique())
     else:
-        sensors_to_process = [sid for sid in selected_sensor_ids if sid != 'all']
+        sensors_to_process = [sid for sid in selected_assy_nos if sid != 'all']
 
     # Filter waveform data for feature extraction
     wave_df_for_extraction = df_for_extraction[df_for_extraction['sensor_id'].isin(sensors_to_process)]
@@ -856,27 +859,47 @@ def download_csv(n_clicks, stored_feature_data):
 
     return dcc.send_data_frame(df_to_download.to_csv, "extracted_features.csv", index=False)
 
-# Callback to update dependent dropdowns
+# Callback for interdependent dropdowns
 @app.callback(
-    [Output('assy-no-dropdown', 'options'),
+    [Output('ng-type-dropdown', 'options'),
+     Output('assy-no-dropdown', 'options'),
      Output('hinban-dropdown', 'options'),
      Output('sensor-type-dropdown', 'options'),
-     Output('assy-no-dropdown', 'value'),
-     Output('hinban-dropdown', 'value'),
-     Output('sensor-type-dropdown', 'value')],
-    [Input('ng-type-dropdown', 'value')]
+     Output('result-dropdown', 'options')],
+    [Input('ng-type-dropdown', 'value'),
+     Input('assy-no-dropdown', 'value'),
+     Input('hinban-dropdown', 'value'),
+     Input('sensor-type-dropdown', 'value'),
+     Input('result-dropdown', 'value')]
 )
-def update_dependent_dropdowns(selected_ng_type):
-    filtered_df = sensor_df
-    if selected_ng_type != 'all':
-        filtered_df = sensor_df[sensor_df['ng_type'] == selected_ng_type]
+def update_interdependent_dropdowns(ng_type, assy_no, hinban, sensor_type, result):
 
-    assy_no_options = [{'label': 'All', 'value': 'all'}] + [{'label': assy, 'value': assy} for assy in filtered_df['AssyNo'].unique()]
-    hinban_options = [{'label': 'All', 'value': 'all'}] + [{'label': hinban, 'value': hinban} for hinban in filtered_df['hinban'].unique()]
-    sensor_type_options = [{'label': 'All', 'value': 'all'}] + [{'label': st, 'value': st} for st in filtered_df['Sensor_Type'].unique()]
+    # Start with the full dataframe
+    dff = sensor_df.copy()
 
-    # Reset dependent dropdowns to 'all' when the parent changes
-    return assy_no_options, hinban_options, sensor_type_options, ['all'], 'all', 'all'
+    # Filter based on selections, but don't filter the dropdown that triggered the callback
+    ctx = dash.callback_context
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    if trigger_id != 'ng-type-dropdown' and 'all' not in ng_type and ng_type:
+        dff = dff[dff['ng_type'].isin(ng_type)]
+    if trigger_id != 'assy-no-dropdown' and 'all' not in assy_no and assy_no:
+        dff = dff[dff['AssyNo'].isin(assy_no)]
+    if trigger_id != 'hinban-dropdown' and hinban != 'all':
+        dff = dff[dff['hinban'] == hinban]
+    if trigger_id != 'sensor-type-dropdown' and sensor_type != 'all':
+        dff = dff[dff['Sensor_Type'] == sensor_type]
+    if trigger_id != 'result-dropdown' and result != 'all':
+        dff = dff[dff['result'] == result]
+
+    # Generate new options based on the filtered dataframe
+    ng_type_opts = [{'label': 'All', 'value': 'all'}] + [{'label': i, 'value': i} for i in dff['ng_type'].unique()]
+    assy_no_opts = [{'label': 'All', 'value': 'all'}] + [{'label': i, 'value': i} for i in dff['AssyNo'].unique()]
+    hinban_opts = [{'label': 'All', 'value': 'all'}] + [{'label': i, 'value': i} for i in dff['hinban'].unique()]
+    sensor_type_opts = [{'label': 'All', 'value': 'all'}] + [{'label': i, 'value': i} for i in dff['Sensor_Type'].unique()]
+    result_opts = [{'label': 'All', 'value': 'all'}] + [{'label': i, 'value': i} for i in dff['result'].unique()]
+
+    return ng_type_opts, assy_no_opts, hinban_opts, sensor_type_opts, result_opts
 
 # Callback to update graph
 @app.callback(
@@ -894,8 +917,8 @@ def update_graph(selected_ng_type, selected_assy_nos, selected_hinban, selected_
     filtered_df = sensor_df.copy()
 
     # Apply filters based on dropdowns
-    if selected_ng_type != 'all':
-        filtered_df = filtered_df[filtered_df['ng_type'] == selected_ng_type]
+    if 'all' not in selected_ng_type and selected_ng_type:
+        filtered_df = filtered_df[filtered_df['ng_type'].isin(selected_ng_type)]
 
     if selected_hinban != 'all':
         filtered_df = filtered_df[filtered_df['hinban'] == selected_hinban]
@@ -923,13 +946,25 @@ def update_graph(selected_ng_type, selected_assy_nos, selected_hinban, selected_
     for assy_no, group in filtered_df.groupby('AssyNo'):
         result = group['result'].iloc[0]
         color = color_map.get(result, 'grey')
+        custom_data = np.stack([
+            group['hinban'],
+            group['ng_type'],
+            group['Sensor_Type']
+        ], axis=-1)
         fig.add_trace(go.Scatter(
             x=group['No'],
             y=group['Sensor_Value'],
             mode='lines',
             name=f"{assy_no} ({result})",
             line=dict(width=line_width, color=color),
-            opacity=opacity
+            opacity=opacity,
+            customdata=custom_data,
+            hovertemplate="<b>AssyNo:</b> " + assy_no + "<br>" +
+                          "<b>No:</b> %{x}<br>" +
+                          "<b>Sensor_Value:</b> %{y}<br>" +
+                          "<b>Hinban:</b> %{customdata[0]}<br>" +
+                          "<b>NG Type:</b> %{customdata[1]}<br>" +
+                          "<b>Sensor Type:</b> %{customdata[2]}<extra></extra>"
         ))
 
     fig.update_layout(
@@ -940,6 +975,19 @@ def update_graph(selected_ng_type, selected_assy_nos, selected_hinban, selected_
     )
     return fig
 
+# Callback to reset all filters
+@app.callback(
+    [Output('ng-type-dropdown', 'value'),
+     Output('assy-no-dropdown', 'value'),
+     Output('hinban-dropdown', 'value'),
+     Output('sensor-type-dropdown', 'value'),
+     Output('result-dropdown', 'value')],
+    [Input('reset-filters-button', 'n_clicks')],
+    prevent_initial_call=True
+)
+def reset_all_filters(n_clicks):
+    return ['all'], ['all'], 'all', 'all', 'all'
+
 if __name__ == '__main__':
     # Define the URL
     URL = "http://127.0.0.1:8050"
@@ -948,3 +996,5 @@ if __name__ == '__main__':
         webbrowser.open_new(URL)
     # Run the app
     app.run(debug=True, host='127.0.0.1', port=8050)
+
+[end of app.py]
