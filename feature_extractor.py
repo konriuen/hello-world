@@ -536,8 +536,8 @@ def tsf_agg_linear_trend_slope_mean(series, chunk_len=5):
 
 
 # --- Helper for result normalization ---
-def numerize_result(result_series, mapping={'OK': 0, 'NG': 1}):
-    """Converts a series of 'OK'/'NG' results to numerical values."""
+def numerize_result(result_series, mapping={'NG': 1, 'OK': 0}):
+    """Converts a series of 'OK'/'NG' results to numerical values. NG is mapped to 1 (positive class)."""
     if not isinstance(result_series, pd.Series):
         result_series = pd.Series(result_series)
     return result_series.map(mapping)
